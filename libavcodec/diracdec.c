@@ -253,6 +253,8 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
     GetBitContext *gb = &slice->gb;
     SliceCoeffs coeffs_num[MAX_DWT_LEVELS];
 
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
+
     skip_bits_long(gb, 8*s->prefix_bytes);
     quant_idx = get_bits(gb, 8);
 
@@ -299,12 +301,19 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
 
         for (level = 0; level < s->wavelet_depth; level++) {
             const SliceCoeffs *c = &coeffs_num[level];
+
+            av_log(s->avctx, AV_LOG_VERBOSE, "  plane: %d, level: %d, SliceCoeffs { left: %d, top: %d, tot_h: %d, tot_v: %d, tot: %d }\n",
+                    i, level, c->left, c->top, c->tot_h, c->tot_v, c->tot);
+
             for (orientation = !!level; orientation < 4; orientation++) {
                 const SubBand *b1 = &s->plane[i].band[level][orientation];
                 uint8_t *buf = b1->ibuf + c->top * b1->stride + (c->left << (s->pshift + 1));
-
                 /* Change to c->tot_h <= 4 for AVX2 dequantization */
                 const int qfunc = s->pshift + 2*(c->tot_h <= 2);
+
+                av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d\n",
+                        orientation, b1->ibuf, buf, (int)(c->top * b1->stride + (c->left << (s->pshift + 1))));
+
                 s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], buf, b1->stride,
                                                    qfactor[level][orientation],
                                                    qoffset[level][orientation],
@@ -326,6 +335,9 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
     DiracContext *s = avctx->priv_data;
     DiracSlice *slices = ((DiracSlice *)arg) + s->num_x*jobnr;
     uint8_t *thread_buf = &s->thread_buf[s->thread_buf_size*threadnr];
+
+    av_log(avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
+
     for (i = 0; i < s->num_x; i++)
         decode_hq_slice(s, &slices[i], thread_buf);
     return 0;
@@ -344,6 +356,8 @@ static int decode_lowdelay(DiracContext *s)
     DiracSlice *slices;
     SliceCoeffs tmp[MAX_DWT_LEVELS];
     int slice_num = 0;
+
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
 
     if (s->slice_params_num_buf != (s->num_x * s->num_y)) {
         s->slice_params_buf = av_realloc_f(s->slice_params_buf, s->num_x * s->num_y, sizeof(DiracSlice));
@@ -464,6 +478,7 @@ static int dirac_unpack_idwt_params(DiracContext *s)
         av_log(s->avctx, AV_LOG_ERROR, errmsg); \
         return AVERROR_INVALIDDATA; \
     }\
+    av_log(s->avctx, AV_LOG_VERBOSE, #dst ": %d\n", tmp);\
     dst = tmp;
 
     align_get_bits(gb);
@@ -545,6 +560,8 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 static int dirac_decode_frame_internal(DiracContext *s)
 {
     int ret;
+
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
 
     if ((ret = decode_lowdelay(s)) < 0)
         return ret;
