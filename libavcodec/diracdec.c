@@ -248,6 +248,7 @@ static int subband_coeffs(DiracContext *s, int x, int y, int p,
  */
 static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
 {
+    static int first_slice = 1;
     int i, level, orientation, quant_idx;
     int qfactor[MAX_DWT_LEVELS][4], qoffset[MAX_DWT_LEVELS][4];
     GetBitContext *gb = &slice->gb;
@@ -302,7 +303,7 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
         for (level = 0; level < s->wavelet_depth; level++) {
             const SliceCoeffs *c = &coeffs_num[level];
 
-            av_log(s->avctx, AV_LOG_VERBOSE, "  plane: %d, level: %d, SliceCoeffs { left: %d, top: %d, tot_h: %d, tot_v: %d, tot: %d }\n",
+            if (first_slice && !i) av_log(s->avctx, AV_LOG_VERBOSE, "  plane: %d, level: %d, SliceCoeffs { left: %d, top: %d, tot_h: %d, tot_v: %d, tot: %d }\n",
                     i, level, c->left, c->top, c->tot_h, c->tot_v, c->tot);
 
             for (orientation = !!level; orientation < 4; orientation++) {
@@ -311,7 +312,7 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
                 /* Change to c->tot_h <= 4 for AVX2 dequantization */
                 const int qfunc = s->pshift + 2*(c->tot_h <= 2);
 
-                av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d\n",
+                if (first_slice && !i) av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d\n",
                         orientation, b1->ibuf, buf, (int)(c->top * b1->stride + (c->left << (s->pshift + 1))));
 
                 s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], buf, b1->stride,
@@ -326,6 +327,7 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
         skip_bits_long(gb, bits_end - get_bits_count(gb));
     }
 
+    first_slice = 0;
     return 0;
 }
 
