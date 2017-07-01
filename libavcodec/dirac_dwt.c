@@ -33,6 +33,20 @@
 #define TEMPLATE_12bit
 #include "dirac_dwt_template.c"
 
+int ff_idwt_hack_init(DWTContext * d, enum dwt_type type)
+{
+    d->spatial_compose = spatial_compose_haari_dy_8bit;
+    d->vertical_compose = (void*)vertical_compose_haar_8bit;
+    if (type == DWT_DIRAC_HAAR0)
+        d->horizontal_compose = horizontal_compose_haar0i_8bit;
+    else
+        d->horizontal_compose = horizontal_compose_haar1i_8bit;
+
+    for (int level = d->decomposition_count - 1; level >= 0; level--)
+        d->cs[level].y = 1;
+    return 0;
+}
+
 int ff_spatial_idwt_init(DWTContext *d, DWTPlane *p, enum dwt_type type,
                          int decomposition_count, int bit_depth)
 {

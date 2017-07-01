@@ -129,6 +129,7 @@ typedef struct DiracContext {
     uint64_t size_scaler;
 
     AVFrame *dummy_frame, *prev_field, *current_picture;
+    FILE *dump;
 } DiracContext;
 
 static int alloc_sequence_buffers(DiracContext *s)
@@ -175,6 +176,10 @@ static av_cold int dirac_decode_init(AVCodecContext *avctx)
 {
     DiracContext *s = avctx->priv_data;
 
+    s->dump = fopen("dump", "wb");
+    if (!s->dump)
+        return ENOMEM;
+
     s->avctx = avctx;
     s->prev_pict_number = 0;
     s->current_picture = NULL;
@@ -204,6 +209,9 @@ static void dirac_decode_flush(AVCodecContext *avctx)
 static av_cold int dirac_decode_end(AVCodecContext *avctx)
 {
     DiracContext *s = avctx->priv_data;
+
+    if (s->dump)
+        fclose(s->dump);
 
     dirac_decode_flush(avctx);
 
@@ -240,6 +248,44 @@ static int subband_coeffs(DiracContext *s, int x, int y, int p,
         coef    += o->tot * (4 - !!level);
     }
     return coef;
+}
+
+static int idwt_hack_slice(AVCodecContext *avctx, DiracContext *s, Plane *p,
+        int w, int h, int stride, uint8_t *dst, uint8_t *src)
+
+{
+    const int idx     = (s->bit_depth - 8) >> 1;
+    const int ostride = p->stride << s->field_coding;
+
+    DWTContext d = {
+        .width = w,
+        .height = h,
+        .stride = stride,
+        .decomposition_count = s->wavelet_depth,
+        .support = 1,
+    };
+    ff_idwt_hack_init(&d, s->wavelet_idx + 2);
+
+    for (int y = 0; y < h; y += 16) {
+        {
+            int y = y + 16, level, support = d.support;
+            for (level = d.decomposition_count-1; level >= 0; level--) {
+                int wl = d.width  >> level;
+                int hl = d.height >> level;
+                int stride_l = d.stride << level;
+
+                while (d.cs[level].y <= FFMIN((y>>level)+support, hl))
+                    d.spatial_compose(&d, level, wl, hl, stride_l);
+            }
+        }
+        s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
+                ostride,
+                p->idwt.buf + y*p->idwt.stride,
+                p->idwt.stride, p->width, 16);
+
+    }
+
+    return 0;
 }
 
 /**
