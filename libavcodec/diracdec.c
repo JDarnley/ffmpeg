@@ -85,6 +85,7 @@ typedef struct DiracSlice {
     int slice_x;
     int slice_y;
     int bytes;
+    int width, height;
 } DiracSlice;
 
 typedef struct DiracContext {
@@ -250,6 +251,7 @@ static int subband_coeffs(DiracContext *s, int x, int y, int p,
     return coef;
 }
 
+#if 0
 static int idwt_hack_slice(AVCodecContext *avctx, DiracContext *s, Plane *p,
         int w, int h, int stride, uint8_t *dst, uint8_t *src)
 
@@ -268,8 +270,8 @@ static int idwt_hack_slice(AVCodecContext *avctx, DiracContext *s, Plane *p,
 
     for (int y = 0; y < h; y += 16) {
         {
-            int y = y + 16, level, support = d.support;
-            for (level = d.decomposition_count-1; level >= 0; level--) {
+            int y = y + 16, support = d.support;
+            for (int level = d.decomposition_count-1; level >= 0; level--) {
                 int wl = d.width  >> level;
                 int hl = d.height >> level;
                 int stride_l = d.stride << level;
@@ -278,15 +280,18 @@ static int idwt_hack_slice(AVCodecContext *avctx, DiracContext *s, Plane *p,
                     d.spatial_compose(&d, level, wl, hl, stride_l);
             }
         }
+#if 0
         s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
                 ostride,
                 p->idwt.buf + y*p->idwt.stride,
                 p->idwt.stride, p->width, 16);
+#endif
 
     }
 
     return 0;
 }
+#endif
 
 /**
  * VC-2 Specification ->
@@ -358,8 +363,12 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
                 /* Change to c->tot_h <= 4 for AVX2 dequantization */
                 const int qfunc = s->pshift + 2*(c->tot_h <= 2);
 
-                if (first_slice && !i) av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d\n",
-                        orientation, b1->ibuf, buf, (int)(c->top * b1->stride + (c->left << (s->pshift + 1))));
+                if (first_slice && !i) av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d, stride: %d\n",
+                        orientation,
+                        b1->ibuf,
+                        buf,
+                        (int)(c->top * b1->stride + (c->left << (s->pshift + 1))),
+                        b1->stride);
 
                 s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], buf, b1->stride,
                                                    qfactor[level][orientation],
@@ -371,6 +380,32 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
         }
 
         skip_bits_long(gb, bits_end - get_bits_count(gb));
+    }
+
+    {
+        uint16_t scratch[32 * 64];
+        DWTContext d;
+        int w = s->avctx->width / s->num_x;
+        int h = s->avctx->height / s->num_y;
+        Plane *p          = &s->plane[0];
+        uint8_t *frame    = (uint8_t *)(s->current_picture->data[0])
+            + slice->slice_x * w + slice->slice_y * h * p->stride;
+        const int idx     = (s->bit_depth - 8) >> 1;
+        const int ostride = p->stride << s->field_coding;
+
+        ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2, s->wavelet_depth, s->bit_depth);
+
+        d.width = w;
+        d.height = h;
+
+        for (int y = 0; y < h; y += 16) {
+            ff_spatial_idwt_slice3(&d, y+16, w, h);
+            s->diracdsp.put_signed_rect_clamped[idx](
+                    frame + y*ostride,
+                    ostride,
+                    p->idwt.buf + y*p->idwt.stride,
+                    p->idwt.stride, w, 16);
+        }
     }
 
     first_slice = 0;
@@ -496,7 +531,7 @@ static void init_planes(DiracContext *s)
                 b->pshift = s->pshift;
                 b->ibuf   = p->idwt.buf;
                 b->level  = level;
-                b->stride = p->idwt.stride << (s->wavelet_depth - level);
+                b->stride = p->idwt.stride /*<< (s->wavelet_depth - level)*/;
                 b->width  = w;
                 b->height = h;
                 b->orientation = orientation;
@@ -614,7 +649,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
     if ((ret = decode_lowdelay(s)) < 0)
         return ret;
 
-    s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
+    //s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
 
     return 0;
 }
