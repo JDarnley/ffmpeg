@@ -133,6 +133,8 @@ typedef struct DiracContext {
     FILE *dump;
 } DiracContext;
 
+static int first_slice_decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf);
+
 static int alloc_sequence_buffers(DiracContext *s)
 {
     int i, w, h, top_padding;
@@ -177,10 +179,6 @@ static av_cold int dirac_decode_init(AVCodecContext *avctx)
 {
     DiracContext *s = avctx->priv_data;
 
-    s->dump = fopen("dump", "wb");
-    if (!s->dump)
-        return ENOMEM;
-
     s->avctx = avctx;
     s->prev_pict_number = 0;
     s->current_picture = NULL;
@@ -210,9 +208,6 @@ static void dirac_decode_flush(AVCodecContext *avctx)
 static av_cold int dirac_decode_end(AVCodecContext *avctx)
 {
     DiracContext *s = avctx->priv_data;
-
-    if (s->dump)
-        fclose(s->dump);
 
     dirac_decode_flush(avctx);
 
@@ -307,6 +302,13 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
 
     av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
 
+#if 0
+    if (first_slice) {
+        first_slice = 0;
+        return first_slice_decode_hq_slice(s, slice, tmp_buf);
+    }
+#endif
+
     skip_bits_long(gb, 8*s->prefix_bytes);
     quant_idx = get_bits(gb, 8);
 
@@ -383,7 +385,6 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
     }
 
     {
-        uint16_t scratch[32 * 64];
         DWTContext d;
         int w = s->avctx->width / s->num_x;
         int h = s->avctx->height / s->num_y;
@@ -409,6 +410,129 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
     }
 
     first_slice = 0;
+    return 0;
+}
+
+static int first_slice_decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
+{
+    int i, level, orientation, quant_idx;
+    int qfactor[MAX_DWT_LEVELS][4], qoffset[MAX_DWT_LEVELS][4];
+    GetBitContext *gb = &slice->gb;
+    SliceCoeffs coeffs_num[MAX_DWT_LEVELS];
+
+    DWTContext d;
+    Plane *p;
+    uint16_t scratch[32 * 64];
+    uint8_t dump[32*64];
+    int w, h, idx;
+
+
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
+
+    skip_bits_long(gb, 8*s->prefix_bytes);
+    quant_idx = get_bits(gb, 8);
+
+    if (quant_idx > DIRAC_MAX_QUANT_INDEX) {
+        av_log(s->avctx, AV_LOG_ERROR, "Invalid quantization index - %i\n", quant_idx);
+        return AVERROR_INVALIDDATA;
+    }
+
+    /* Slice quantization (slice_quantizers() in the specs) */
+    for (level = 0; level < s->wavelet_depth; level++) {
+        for (orientation = !!level; orientation < 4; orientation++) {
+            const int quant = FFMAX(quant_idx - s->quant[level][orientation], 0);
+            qfactor[level][orientation] = ff_dirac_qscale_tab[quant];
+            qoffset[level][orientation] = ff_dirac_qoffset_intra_tab[quant] + 2;
+        }
+    }
+
+    /* Luma + 2 Chroma planes */
+    for (i = 0; i < 3; i++) {
+        int coef_num, coef_par, off = 0;
+        int64_t length = s->size_scaler*get_bits(gb, 8);
+        int64_t bits_end = get_bits_count(gb) + 8*length;
+        const uint8_t *addr = align_get_bits(gb);
+
+        if (length*8 > get_bits_left(gb)) {
+            av_log(s->avctx, AV_LOG_ERROR, "end too far away\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        coef_num = subband_coeffs(s, slice->slice_x, slice->slice_y, i, coeffs_num);
+
+        if (s->pshift)
+            coef_par = ff_dirac_golomb_read_32bit(s->reader_ctx, addr,
+                                                  length, tmp_buf, coef_num);
+        else
+            coef_par = ff_dirac_golomb_read_16bit(s->reader_ctx, addr,
+                                                  length, tmp_buf, coef_num);
+
+        if (coef_num > coef_par) {
+            const int start_b = coef_par * (1 << (s->pshift + 1));
+            const int end_b   = coef_num * (1 << (s->pshift + 1));
+            memset(&tmp_buf[start_b], 0, end_b - start_b);
+        }
+
+        for (level = 0; level < s->wavelet_depth; level++) {
+            const SliceCoeffs *c = &coeffs_num[level];
+
+            if (!i) av_log(s->avctx, AV_LOG_VERBOSE, "  plane: %d, level: %d, SliceCoeffs { left: %d, top: %d, tot_h: %d, tot_v: %d, tot: %d }\n",
+                    i, level, c->left, c->top, c->tot_h, c->tot_v, c->tot);
+
+            for (orientation = !!level; orientation < 4; orientation++) {
+                const SubBand *b1 = &s->plane[i].band[level][orientation];
+                uint8_t *buf = b1->ibuf + c->top * b1->stride + (c->left << (s->pshift + 1));
+                /* Change to c->tot_h <= 4 for AVX2 dequantization */
+                const int qfunc = s->pshift + 2*(c->tot_h <= 2);
+
+                if (!i) av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d, stride: %d\n",
+                        orientation,
+                        b1->ibuf,
+                        buf,
+                        (int)(c->top * b1->stride + (c->left << (s->pshift + 1))),
+                        b1->stride);
+
+                if (!i) s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], scratch, 64,
+                        qfactor[level][orientation],
+                        qoffset[level][orientation],
+                        c->tot_v, c->tot_h);
+
+                off += c->tot << (s->pshift + 1);
+            }
+        }
+
+        skip_bits_long(gb, bits_end - get_bits_count(gb));
+    }
+
+    w = s->avctx->width / s->num_x;
+    h = s->avctx->height / s->num_y;
+    p = &s->plane[0];
+    idx = (s->bit_depth - 8) >> 1;
+
+    ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2, s->wavelet_depth, s->bit_depth);
+
+    d.buffer = scratch;
+    d.width = w;
+    d.height = h;
+    d.stride = 64;
+
+    for (int y = 0; y < h; y += 16) {
+        ff_spatial_idwt_slice3(&d, y+16, w, h);
+        s->diracdsp.put_signed_rect_clamped[idx](
+                dump + y*32,
+                32,
+                (uint8_t*)(scratch) + y*64,
+                64, w, 16);
+    }
+
+    {
+    FILE *fh = fopen("dump", "wb");
+    if (!fh)
+        return ENOMEM;
+    fwrite(dump, 1, 32*64, fh);
+    fclose(fh);
+    }
+
     return 0;
 }
 
