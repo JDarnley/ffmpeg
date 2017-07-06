@@ -385,34 +385,46 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
     }
 
     {
-        DWTContext d;
-        int w = s->avctx->width / s->num_x;
-        int h = s->avctx->height / s->num_y;
-        Plane *p          = &s->plane[0];
-        uint8_t *frame    = (uint8_t *)(s->current_picture->data[0])
-            + slice->slice_x * w + slice->slice_y * h * p->stride;
-        const int idx     = (s->bit_depth - 8) >> 1;
-        const int ostride = p->stride << s->field_coding;
+    DWTContext d;
+    Plane *p = &s->plane[0];
+    const int idx     = (s->bit_depth - 8) >> 1;
+    const int ostride = p->stride << s->field_coding;
+    int y_fuck_you[8] = {1,1,1,1,1,1,1,1};
+    uint8_t *frame = s->current_picture->data[0]
+        + slice->slice_x*32
+        + slice->slice_y*64*ostride;
 
-        ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2, s->wavelet_depth, s->bit_depth);
+    ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2, s->wavelet_depth, s->bit_depth);
 
-        d.width = w;
-        d.height = h;
-
-        for (int y = 0; y < h; y += 16) {
-            ff_spatial_idwt_slice3(&d, y+16, w, h);
-            s->diracdsp.put_signed_rect_clamped[idx](
-                    frame + y*ostride,
-                    ostride,
-                    p->idwt.buf + y*p->idwt.stride,
-                    p->idwt.stride, w, 16);
+    for (int y = 0; y < 64; y += 16) {
+        //ff_spatial_idwt_slice3(&d, y+16, w, h);
+        for (int level = s->wavelet_depth - 1; level >= 0; level--) {
+            int wl = 32 >> level;
+            int hl = 64 >> level;
+            ptrdiff_t stride_l = p->idwt.stride << level;
+            while (y_fuck_you[level] <= FFMIN(((y+16) >> level) + 1, hl)) {
+                uint8_t *b0 = d.buffer + (y_fuck_you[level]-1) * stride_l;
+                uint8_t *b1 = d.buffer + (y_fuck_you[level]) * stride_l;
+                ((vertical_compose_2tap)d.vertical_compose)(b0, b1, wl);
+                d.horizontal_compose(b0, d.temp, wl);
+                d.horizontal_compose(b1, d.temp, wl);
+                y_fuck_you[level] += 2;
+            }
         }
+
+        s->diracdsp.put_signed_rect_clamped[idx](
+                frame + y*ostride,
+                ostride,
+                p->idwt.buf + y*p->idwt.stride,
+                p->idwt.stride, 32, 16);
+    }
     }
 
     first_slice = 0;
     return 0;
 }
 
+#if 0
 static int first_slice_decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
 {
     int i, level, orientation, quant_idx;
@@ -535,6 +547,7 @@ static int first_slice_decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8
 
     return 0;
 }
+#endif
 
 static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
