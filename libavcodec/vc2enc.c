@@ -700,9 +700,6 @@ static int calc_slice_sizes(VC2EncContext *s)
     for (slice_y = 0; slice_y < s->num_y; slice_y++) {
         for (slice_x = 0; slice_x < s->num_x; slice_x++) {
             SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
-            args->ctx = s;
-            args->x   = slice_x;
-            args->y   = slice_y;
             args->bits_ceil  = s->slice_max_bytes << 3;
             args->bits_floor = s->slice_min_bytes << 3;
             memset(args->cache, 0, s->q_ceil*sizeof(*args->cache));
@@ -1204,6 +1201,17 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     s->slice_args = av_calloc(s->num_x*s->num_y, sizeof(SliceArgs));
     if (!s->slice_args)
         goto alloc_fail;
+    else {
+        int x, y;
+        for (y = 0; y < s->num_y; y++) {
+            for (x = 0; x < s->num_x; x++) {
+                SliceArgs *args = &s->slice_args[s->num_x * y + x];
+                args->ctx = s;
+                args->x   = x;
+                args->y   = y;
+            }
+        }
+    }
 
     /* Lookup tables */
     s->coef_lut_len = av_malloc(COEF_LUT_TAB*(s->q_ceil+1)*sizeof(*s->coef_lut_len));
