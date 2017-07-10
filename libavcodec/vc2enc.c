@@ -928,7 +928,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
 
     for (level = s->wavelet_depth-1; level >= 0; level--) {
         const SubBand *b = &p->band[level][0];
-        t->vc2_subband_dwt[idx](t, p->coef_buf, p->coef_stride,
+        t->vc2_subband_dwt[idx](t->buffer, p->coef_buf, p->coef_stride,
                                 b->width, b->height);
     }
 

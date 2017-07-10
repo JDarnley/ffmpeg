@@ -52,11 +52,11 @@ static av_always_inline void deinterleave(dwtcoef *linell, ptrdiff_t stride,
     }
 }
 
-static void vc2_subband_dwt_97(VC2TransformContext *t, dwtcoef *data,
+static void vc2_subband_dwt_97(dwtcoef *synth, dwtcoef *data,
                                ptrdiff_t stride, int width, int height)
 {
     int x, y;
-    dwtcoef *datal = data, *synth = t->buffer, *synthl = synth;
+    dwtcoef *datal = data, *synthl = synth;
     const ptrdiff_t synth_width  = width  << 1;
     const ptrdiff_t synth_height = height << 1;
 
@@ -137,11 +137,11 @@ static void vc2_subband_dwt_97(VC2TransformContext *t, dwtcoef *data,
     deinterleave(data, stride, width, height, synth);
 }
 
-static void vc2_subband_dwt_53(VC2TransformContext *t, dwtcoef *data,
+static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
                                ptrdiff_t stride, int width, int height)
 {
     int x, y;
-    dwtcoef *synth = t->buffer, *synthl = synth, *datal = data;
+    dwtcoef *synthl = synth, *datal = data;
     const ptrdiff_t synth_width  = width  << 1;
     const ptrdiff_t synth_height = height << 1;
 
@@ -211,12 +211,12 @@ static void vc2_subband_dwt_53(VC2TransformContext *t, dwtcoef *data,
     deinterleave(data, stride, width, height, synth);
 }
 
-static av_always_inline void dwt_haar(VC2TransformContext *t, dwtcoef *data,
+static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
                                       ptrdiff_t stride, int width, int height,
                                       const int s)
 {
     int x, y;
-    dwtcoef *synth = t->buffer, *synthl = synth, *datal = data;
+    dwtcoef *synthl = synth, *datal = data;
     const ptrdiff_t synth_width  = width  << 1;
     const ptrdiff_t synth_height = height << 1;
 
@@ -243,16 +243,16 @@ static av_always_inline void dwt_haar(VC2TransformContext *t, dwtcoef *data,
     deinterleave(data, stride, width, height, synth);
 }
 
-static void vc2_subband_dwt_haar(VC2TransformContext *t, dwtcoef *data,
+static void vc2_subband_dwt_haar(dwtcoef *synth, dwtcoef *data,
                                  ptrdiff_t stride, int width, int height)
 {
-    dwt_haar(t, data, stride, width, height, 0);
+    dwt_haar(synth, data, stride, width, height, 0);
 }
 
-static void vc2_subband_dwt_haar_shift(VC2TransformContext *t, dwtcoef *data,
+static void vc2_subband_dwt_haar_shift(dwtcoef *synth, dwtcoef *data,
                                        ptrdiff_t stride, int width, int height)
 {
-    dwt_haar(t, data, stride, width, height, 1);
+    dwt_haar(synth, data, stride, width, height, 1);
 }
 
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
