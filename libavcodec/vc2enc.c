@@ -580,9 +580,9 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
     const uint32_t *val_lut = &s->coef_lut_val[quant*COEF_LUT_TAB];
 
     dwtcoef *coeff = p->coef_buf
-                   + sx*p->slice_w*p->slice_h /* x * size of slice */
-                   + sy*p->slice_w*p->slice_h*s->num_x /* y * size of row */
-                   + b->top*p->slice_w;
+                   + sx*p->slice_w
+                   + sy*p->slice_h*p->coef_stride
+                   + b->top*p->coef_stride;
 
     for (y = b->top; y < b->bottom; y++) {
         for (x = b->left; x < b->right; x++) {
@@ -597,7 +597,7 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
                     put_bits(pb, 1, neg);
             }
         }
-        coeff += p->slice_w;
+        coeff += p->coef_stride;
     }
 }
 
@@ -729,9 +729,9 @@ static int count_hq_slice2(SliceArgs *slice, int quant_idx)
                 const int qfactor = ff_dirac_qscale_tab[q_idx];
 
                 dwtcoef *buf = p->coef_buf
-                             + slice->x*p->slice_w*p->slice_h /* x * size of slice */
-                             + slice->y*p->slice_w*p->slice_h*s->num_x /* y * size of row */
-                             + b->top*p->slice_w;
+                             + slice->x*p->slice_w
+                             + slice->y*p->slice_h*p->coef_stride
+                             + b->top*p->coef_stride;
 
                 for (y = b->top; y < b->bottom; y++) {
                     for (x = b->left; x < b->right; x++) {
@@ -744,7 +744,7 @@ static int count_hq_slice2(SliceArgs *slice, int quant_idx)
                             bits += !!c_abs;
                         }
                     }
-                    buf += p->slice_w;
+                    buf += p->coef_stride;
                 }
             }
         }
@@ -1136,9 +1136,9 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     /* pixel frame stride is in bytes but sample size is needed */
     ptrdiff_t pixel_stride = ta->istride >> (s->bpp - 1);
     /* coeff stride is in number of values */
-    //ptrdiff_t coeff_stride = p->coef_stride;
-    dwtcoef *coeff_data    = p->coef_buf + x*w*h + y*w*h*s->num_x;
-    dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
+    ptrdiff_t coeff_stride = p->coef_stride;
+    dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
+    dwtcoef *transform_buf = t->buffer   + x*w + y*h*coeff_stride;
 
     ptrdiff_t offset = x*w + y*h*pixel_stride;
     if (field == 1) {
@@ -1155,7 +1155,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
             for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
-            buf += w;
+            buf += coeff_stride;
             pix += pixel_stride;
         }
     } else {
@@ -1165,7 +1165,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
             for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
-            buf += w;
+            buf += coeff_stride;
             pix += pixel_stride;
         }
     }
@@ -1173,7 +1173,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         w >>= 1;
         h >>= 1;
-        t->vc2_subband_dwt[idx](transform_buf, coeff_data, p->slice_w,
+        t->vc2_subband_dwt[idx](transform_buf, coeff_data, coeff_stride,
                 w, h);
     }
 
