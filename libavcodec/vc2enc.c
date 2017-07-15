@@ -29,9 +29,7 @@
 #include "vc2enc_dwt.h"
 #include "diractab.h"
 
-#define SLICE_TRANSFORM 1
-#define SLICE_ENCODE_SUBBAND 1
-#define SLICE_COUNT_HQ_SLICE 1
+#define NEW_SLICES 0
 
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
@@ -760,7 +758,7 @@ static int count_hq_slice2(SliceArgs *slice, int quant_idx)
     return bits;
 }
 
-#if SLICE_COUNT_HQ_SLICE
+#if NEW_SLICES
 #define count_hq_slice count_hq_slice2
 #else
 #define count_hq_slice count_hq_slice1
@@ -901,7 +899,7 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
         put_bits(pb, 8, 0);
         for (level = 0; level < s->wavelet_depth; level++) {
             for (orientation = !!level; orientation < 4; orientation++) {
-#if SLICE_ENCODE_SUBBAND
+#if NEW_SLICES
                 encode_subband2(s, pb, p, slice_x, slice_y,
                                &p->band[level][orientation],
                                quants[level][orientation]);
@@ -1194,7 +1192,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         s->transform_args[i].idata = frame->data[i];
         s->transform_args[i].istride = frame->linesize[i];
     }
-#if SLICE_TRANSFORM
+#if NEW_SLICES
     /* TODO: use threads */
     for (i = 0; i < s->num_x*s->num_y*3; i++)
         dwt_slice(s->avctx, NULL, i, 0);
