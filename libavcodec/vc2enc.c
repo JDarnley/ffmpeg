@@ -1444,8 +1444,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         int h              = avctx->height   >> chroma_y_shift;
         int slice_w        = s->slice_width  >> chroma_x_shift;
         int slice_h        = s->slice_height >> chroma_y_shift;
-        int alignment      = FFMAX3(32, 1 << s->wavelet_depth,
-                             FFMAX(slice_w, slice_h));
+        int alignment      = 1 << s->wavelet_depth;
         Plane *p           = &s->plane[i];
 
         if (s->interlaced) {
@@ -1462,6 +1461,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->slice_w    = slice_w;
         p->slice_h    = slice_h;
 
+        w             = FFALIGN(w, FFMAX(32, slice_w));
+        h             = FFALIGN(h, FFMAX(32, slice_h));
         p->align_w    = w;
         p->align_h    = h;
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
@@ -1472,6 +1473,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         if (ff_vc2enc_init_transforms(&s->transform_args[i].t, w, h, slice_w, slice_h))
             goto alloc_fail;
 
+        w = p->dwt_width;
+        h = p->dwt_height;
         for (level = s->wavelet_depth-1; level >= 0; level--) {
             w = w >> 1;
             h = h >> 1;
