@@ -182,6 +182,8 @@ typedef struct VC2EncContext {
     /* Parse code state */
     uint32_t next_parse_offset;
     enum DiracParseCodes last_parse_code;
+
+    int const_quant;
 } VC2EncContext;
 
 static av_always_inline void put_vc2_ue_uint(PutBitContext *pb, uint32_t val)
@@ -933,6 +935,72 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
     return 0;
 }
 
+static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
+{
+    int bytes = 0;
+
+    for (int i = 0; i < s->num_x * s->num_y; i++)
+    {
+        SliceArgs *slice = &s->slice_args[i];
+        int x, y;
+        uint8_t quants[MAX_DWT_LEVELS][4];
+        int bits = 0, p, level, orientation;
+
+        bits += 8*s->prefix_bytes;
+        bits += 8; /* quant_idx */
+
+        for (level = 0; level < s->wavelet_depth; level++)
+            for (orientation = !!level; orientation < 4; orientation++)
+                quants[level][orientation] = FFMAX(quant_idx - s->quant[level][orientation], 0);
+
+        for (p = 0; p < 3; p++) {
+            int bytes_start, bytes_len, pad_s, pad_c;
+            bytes_start = bits >> 3;
+            bits += 8;
+            for (level = 0; level < s->wavelet_depth; level++) {
+                for (orientation = !!level; orientation < 4; orientation++) {
+                    SubBand *b = &s->plane[p].band[level][orientation];
+
+                    const int q_idx = quants[level][orientation];
+                    const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
+                    const int qfactor = ff_dirac_qscale_tab[q_idx];
+
+                    const int left   = b->width  * slice->x    / s->num_x;
+                    const int right  = b->width  *(slice->x+1) / s->num_x;
+                    const int top    = b->height * slice->y    / s->num_y;
+                    const int bottom = b->height *(slice->y+1) / s->num_y;
+
+                    dwtcoef *buf = b->buf + top * b->stride;
+
+                    for (y = top; y < bottom; y++) {
+                        for (x = left; x < right; x++) {
+                            uint32_t c_abs = FFABS(buf[x]);
+                            if (c_abs < COEF_LUT_TAB) {
+                                bits += len_lut[c_abs];
+                            } else {
+                                c_abs = QUANT(c_abs, qfactor);
+                                bits += count_vc2_ue_uint(c_abs);
+                                bits += !!c_abs;
+                            }
+                        }
+                        buf += b->stride;
+                    }
+                }
+            }
+            bits += FFALIGN(bits, 8) - bits;
+            bytes_len = (bits >> 3) - bytes_start - 1;
+            pad_s = FFALIGN(bytes_len, s->size_scaler)/s->size_scaler;
+            pad_c = (pad_s*s->size_scaler) - bytes_len;
+            bits += pad_c*8;
+        }
+
+        slice->bytes = SSIZE_ROUND(bits >> 3);
+        bytes += SSIZE_ROUND(bits >> 3);
+    }
+
+    return bytes;
+}
+
 static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                         const char *aux_data, const int header_size, int field)
 {
@@ -951,7 +1019,13 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                       sizeof(TransformArgs));
 
     /* Calculate per-slice quantizers and sizes */
-    max_frame_bytes = header_size + calc_slice_sizes(s);
+    max_frame_bytes = header_size;
+    if(s->avctx->flags & AV_CODEC_FLAG_QSCALE) {
+        max_frame_bytes += constant_quantiser_slice_sizes(s, s->const_quant);
+    }
+    else {
+        max_frame_bytes += calc_slice_sizes(s);
+    }
 
     if (field < 2) {
         ret = ff_alloc_packet2(s->avctx, avpkt,
@@ -1061,6 +1135,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     Plane *p;
     SubBand *b;
     int i, j, level, o, shift, ret;
+    int const_quant = 0;
     const AVPixFmtDescriptor *fmt = av_pix_fmt_desc_get(avctx->pix_fmt);
     const int depth = fmt->comp[0].depth;
     VC2EncContext *s = avctx->priv_data;
@@ -1107,6 +1182,20 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
 
     if (s->interlaced)
         av_log(avctx, AV_LOG_WARNING, "Interlacing enabled!\n");
+
+    if (avctx->flags & AV_CODEC_FLAG_QSCALE) {
+        const int quant_max = FF_ARRAY_ELEMS(ff_dirac_qscale_tab);
+        const_quant = avctx->global_quality / FF_QP2LAMBDA;
+
+        if (const_quant < 0 || const_quant >= quant_max) {
+            av_log(avctx, AV_LOG_ERROR, "constant quantiser (%d) outside valid range [%d..%d]\n",
+                    const_quant, 0, quant_max);
+            return AVERROR(EINVAL);
+        }
+        av_log(avctx, AV_LOG_WARNING, "encoding with constant quantiser (%d)\n",
+                const_quant);
+        s->const_quant = const_quant;
+    }
 
     if ((s->slice_width  & (s->slice_width  - 1)) ||
         (s->slice_height & (s->slice_height - 1))) {
@@ -1209,6 +1298,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                 args->ctx = s;
                 args->x   = x;
                 args->y   = y;
+                args->quant_idx = const_quant;
             }
         }
     }
