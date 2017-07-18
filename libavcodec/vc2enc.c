@@ -29,7 +29,7 @@
 #include "vc2enc_dwt.h"
 #include "diractab.h"
 
-#define NEW_SLICES 0
+#define NEW_SLICES 1
 
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
@@ -1077,23 +1077,35 @@ static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
                 quants[level][orientation] = FFMAX(quant_idx - s->quant[level][orientation], 0);
 
         for (p = 0; p < 3; p++) {
+            Plane *plane = &s->plane[p];
             int bytes_start, bytes_len, pad_s, pad_c;
             bytes_start = bits >> 3;
             bits += 8;
             for (level = 0; level < s->wavelet_depth; level++) {
                 for (orientation = !!level; orientation < 4; orientation++) {
-                    SubBand *b = &s->plane[p].band[level][orientation];
+                    SubBand *b = &plane->band[level][orientation];
 
                     const int q_idx = quants[level][orientation];
                     const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
                     const int qfactor = ff_dirac_qscale_tab[q_idx];
 
+#if NEW_SLICES
+                    const int left = b->left;
+                    const int top  = b->top;
+                    const int right = b->right;
+                    const int bottom = b->right;
+                    dwtcoef *buf = plane->coef_buf
+                                 + slice->x * plane->slice_w
+                                 + slice->y * plane->slice_h * p->coef_stride
+                                 + b->top * p->coef_stride;
+#else
                     const int left   = b->width  * slice->x    / s->num_x;
                     const int right  = b->width  *(slice->x+1) / s->num_x;
                     const int top    = b->height * slice->y    / s->num_y;
                     const int bottom = b->height *(slice->y+1) / s->num_y;
 
                     dwtcoef *buf = b->buf + top * b->stride;
+#endif
 
                     for (y = top; y < bottom; y++) {
                         for (x = left; x < right; x++) {
@@ -1151,6 +1163,11 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
     dwtcoef *transform_buf = t->buffer   + x*w + y*h*coeff_stride;
 
+    int plane_lines_remaining = p->height - y*h;
+    if (!x)
+        av_log(s->avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
+                plane_lines_remaining);
+
     ptrdiff_t offset = x*w + y*h*pixel_stride;
     if (field == 1) {
         pixel_stride <<= 1;
@@ -1162,7 +1179,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     if (s->bpp == 1) {
         dwtcoef *buf = coeff_data;
         const uint8_t *pix = (const uint8_t *)ta->idata + offset;
-        for (int y = 0; y < h*skip; y+=skip) {
+        for (int y = 0; y < h*skip && y < plane_lines_remaining; y+=skip) {
             for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
@@ -1172,7 +1189,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     } else {
         dwtcoef *buf = coeff_data;
         const uint16_t *pix = (const uint16_t *)ta->idata + offset;
-        for (int y = 0; y < h*skip; y+=skip) {
+        for (int y = 0; y < h*skip && y < plane_lines_remaining; y+=skip) {
             for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
@@ -1199,11 +1216,14 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
 
      /* Threaded DWT transform */
     for (i = 0; i < 3; i++) {
+        Plane *p = &s->plane[i];
         s->transform_args[i].ctx   = s;
         s->transform_args[i].field = field;
-        s->transform_args[i].plane = &s->plane[i];
+        s->transform_args[i].plane = p;
         s->transform_args[i].idata = frame->data[i];
         s->transform_args[i].istride = frame->linesize[i];
+        memset(p->coef_buf + p->height * p->coef_stride, 0,
+                sizeof(dwtcoef) * p->coef_stride * (p->align_h - p->height));
     }
 #if NEW_SLICES
     /* TODO: use threads */
@@ -1474,8 +1494,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->slice_w    = slice_w;
         p->slice_h    = slice_h;
 
-        w             = FFALIGN(w, FFMAX(32, slice_w));
-        h             = FFALIGN(h, FFMAX(32, slice_h));
+        w             = FFALIGN(w, slice_w);
+        h             = FFALIGN(h, slice_h);
         p->align_w    = w;
         p->align_h    = h;
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
@@ -1515,8 +1535,13 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     }
 
     /* Slices */
+#if NEW_SLICES
+    s->num_x = s->plane[0].align_w/s->slice_width;
+    s->num_y = s->plane[0].align_h/s->slice_height;
+#else
     s->num_x = s->plane[0].dwt_width/s->slice_width;
     s->num_y = s->plane[0].dwt_height/s->slice_height;
+#endif
 
     s->slice_args = av_calloc(s->num_x*s->num_y, sizeof(SliceArgs));
     if (!s->slice_args)
