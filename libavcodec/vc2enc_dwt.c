@@ -262,8 +262,10 @@ av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_width, int p
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR]   = vc2_subband_dwt_haar;
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR_S] = vc2_subband_dwt_haar_shift;
 
-    s->buffer = av_malloc(2*p_width*p_height*sizeof(dwtcoef));
-    if (!s->buffer)
+    s->buffer[0] = av_malloc(p_width*p_height*sizeof(dwtcoef));
+    s->buffer[1] = av_malloc(p_width*p_height*sizeof(dwtcoef));
+    s->buffer[2] = av_malloc(p_width*p_height*sizeof(dwtcoef));
+    if (!s->buffer[0] || !s->buffer[1] || ! s->buffer[2])
         return 1;
 
     return 0;
@@ -271,5 +273,7 @@ av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_width, int p
 
 av_cold void ff_vc2enc_free_transforms(VC2TransformContext *s)
 {
-    av_freep(&s->buffer);
+    av_freep(&s->buffer[0]);
+    av_freep(&s->buffer[1]);
+    av_freep(&s->buffer[2]);
 }
