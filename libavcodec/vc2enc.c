@@ -583,9 +583,9 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
                    + sy*p->slice_h*p->coef_stride
                    + b->top*p->coef_stride;
 
-    if (!sx && p == &s->plane[0])
-        av_log(s->avctx, AV_LOG_VERBOSE, "%s: Slice[%d,%d] first line %d\n",
-                __func__, sx, sy, sy * p->slice_h + b->top);
+//    if (!sx && p == &s->plane[0])
+//        av_log(s->avctx, AV_LOG_VERBOSE, "%s: Slice[%d,%d] first line %d\n",
+//                __func__, sx, sy, sy * p->slice_h + b->top);
 
     for (y = b->top; y < b->bottom; y++) {
         for (x = b->left; x < b->right; x++) {
@@ -1047,11 +1047,13 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
         }
     }
 
-    av_log(s->avctx, AV_LOG_VERBOSE, "memset %d rows\n", p->dwt_height - p->height);
+//    av_log(avctx, AV_LOG_VERBOSE, "memset %d rows\n", p->dwt_height - p->height);
     memset(buf, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 
     for (level = s->wavelet_depth-1; level >= 0; level--) {
         const SubBand *b = &p->band[level][0];
+        av_log(avctx, AV_LOG_VERBOSE, "transform stride: %d, width: %d, height: %d\n",
+                (int)p->coef_stride, b->width, b->height);
         t->vc2_subband_dwt[idx](t->buffer, p->coef_buf, p->coef_stride,
                                 b->width, b->height);
     }
@@ -1153,9 +1155,9 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     int w = p->slice_w, h = p->slice_h;
     int x = slice->x,   y = slice->y;
 
-    if (!i_plane && (!x || !y))
-        av_log(s->avctx, AV_LOG_VERBOSE, "transforming plane[%d] slice[%d,%d]\n",
-                i_plane, x, y);
+//    if (/*!i_plane &&*/ (!x || !y))
+//        av_log(avctx, AV_LOG_VERBOSE, "transforming plane[%d] slice[%d,%d]\n",
+//                i_plane, x, y);
 
     /* pixel frame stride is in bytes but sample size is needed */
     ptrdiff_t pixel_stride = ta->istride >> (s->bpp - 1);
@@ -1165,9 +1167,9 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     dwtcoef *transform_buf = t->buffer   + x*w + y*h*coeff_stride;
 
     int plane_lines_remaining = p->height - y*h;
-    if (!x)
-        av_log(s->avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
-                plane_lines_remaining);
+//    if (!x)
+//        av_log(avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
+//                plane_lines_remaining);
 
     ptrdiff_t offset = x*w + y*h*pixel_stride;
     if (field == 1) {
