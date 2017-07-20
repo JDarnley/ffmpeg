@@ -30,6 +30,7 @@
 #include "diractab.h"
 
 #define NEW_SLICES 1
+#define THREADED_TRANSFORM 1
 
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
@@ -1226,9 +1227,13 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                 sizeof(dwtcoef) * p->coef_stride * (p->align_h - p->height));
     }
 #if NEW_SLICES
-    /* TODO: use threads */
+#if THREADED_TRANSFORM
+    s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
+            s->num_x*s->num_y*3);
+#else
     for (i = 0; i < s->num_x*s->num_y*3; i++)
         dwt_slice(s->avctx, NULL, i, 0);
+#endif
 #else
     s->avctx->execute(s->avctx, dwt_plane, s->transform_args, NULL, 3,
                       sizeof(TransformArgs));
