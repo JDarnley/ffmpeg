@@ -1169,7 +1169,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
     dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
-    dwtcoef *transform_buf = t->buffer   + x*w + y*h*coeff_stride;
+    dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
     int plane_lines_remaining = p->height - y*h;
 //    if (!x)
