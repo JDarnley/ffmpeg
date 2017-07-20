@@ -1093,11 +1093,11 @@ static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
                     const int left = b->left;
                     const int top  = b->top;
                     const int right = b->right;
-                    const int bottom = b->right;
+                    const int bottom = b->bottom;
                     dwtcoef *buf = plane->coef_buf
                                  + slice->x * plane->slice_w
-                                 + slice->y * plane->slice_h * p->coef_stride
-                                 + b->top * p->coef_stride;
+                                 + slice->y * plane->slice_h * plane->coef_stride
+                                 + b->top * plane->coef_stride;
 #else
                     const int left   = b->width  * slice->x    / s->num_x;
                     const int right  = b->width  *(slice->x+1) / s->num_x;
