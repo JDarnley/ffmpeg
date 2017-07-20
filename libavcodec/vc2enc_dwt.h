@@ -40,7 +40,7 @@ enum VC2TransformType {
 };
 
 typedef struct VC2TransformContext {
-    dwtcoef *buffer[3];
+    dwtcoef *buffer;
     void (*vc2_subband_dwt[VC2_TRANSFORMS_NB])(dwtcoef *synth,
                                                dwtcoef *data, ptrdiff_t stride,
                                                int width, int height);

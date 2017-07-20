@@ -1059,7 +1059,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
         const SubBand *b = &p->band[level][0];
         av_log(avctx, AV_LOG_VERBOSE, "transform stride: %d, width: %d, height: %d\n",
                 (int)p->coef_stride, b->width, b->height);
-        t->vc2_subband_dwt[idx](t->buffer[0], p->coef_buf, p->coef_stride,
+        t->vc2_subband_dwt[idx](t->buffer, p->coef_buf, p->coef_stride,
                                 b->width, b->height);
     }
 
@@ -1168,8 +1168,8 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     ptrdiff_t pixel_stride = ta->istride >> (s->bpp - 1);
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
-    dwtcoef *coeff_data    = p->coef_buf        + x*w + y*h*coeff_stride;
-    dwtcoef *transform_buf = t->buffer[i_plane] + x*w + y*h*coeff_stride;
+    dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
+    dwtcoef *transform_buf = t->buffer   + x*w + y*h*coeff_stride;
 
     int plane_lines_remaining = p->height - y*h;
 //    if (!x)
