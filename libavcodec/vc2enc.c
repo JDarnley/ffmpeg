@@ -958,8 +958,13 @@ static int encode_slices(VC2EncContext *s)
         }
     }
 
+#if 0
     s->avctx->execute(s->avctx, encode_hq_slice, enc_args, NULL, s->num_x*s->num_y,
                       sizeof(SliceArgs));
+#else
+    for (int i = 0; i < s->num_x*s->num_y; i++)
+        encode_hq_slice(s->avctx, enc_args + i);
+#endif
 
     skip_put_bytes(&s->pb, skip);
 
