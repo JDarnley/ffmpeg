@@ -1252,6 +1252,13 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
                 w, h);
     }
 
+    w = p->slice_w, h = p->slice_h;
+    //dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
+    for (int i = 0; i < p->slice_h; i++)
+        memcpy(p->coef_buf + x*p->slice_w + y*h*p->coef_stride + i*p->coef_stride,
+                s->dwt_slice_scratch[threadnr] + (i+8)*coeff_stride + 8,
+                p->slice_w * sizeof(dwtcoef));
+
     return 0;
 }
 
