@@ -29,10 +29,6 @@
 #include "vc2enc_dwt.h"
 #include "diractab.h"
 
-#ifndef MAX_THREADS
-#define MAX_THREADS 64
-#endif
-
 #define NEW_SLICES 1
 #define THREADED_TRANSFORM 1
 
@@ -194,8 +190,6 @@ typedef struct VC2EncContext {
     enum DiracParseCodes last_parse_code;
 
     int const_quant;
-
-    dwtcoef *dwt_slice_scratch[MAX_THREADS];
 } VC2EncContext;
 
 static av_always_inline void put_vc2_ue_uint(PutBitContext *pb, uint32_t val)
@@ -1173,10 +1167,11 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     /* pixel frame stride is in bytes but sample size is needed */
     ptrdiff_t pixel_stride = ta->istride >> (s->bpp - 1);
     /* coeff stride is in number of values */
-    ptrdiff_t coeff_stride = w + 16;
-    dwtcoef *coeff_data    = s->dwt_slice_scratch[threadnr];
+    ptrdiff_t coeff_stride = p->coef_stride;
+    dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
     dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
+    int plane_lines_remaining = p->height - y*h;
 //    if (!x)
 //        av_log(avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
 //                plane_lines_remaining);
@@ -1192,51 +1187,17 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     if (s->bpp == 1) {
         dwtcoef *buf = coeff_data;
         const uint8_t *pix = (const uint8_t *)ta->idata + offset;
-
-        /* top edge extention, TODO: interlace support */
-        for (int y = 0; y < 4; y++) {
-            for (int x = 0; x < w; x++)
-                buf[x+8] = pix[x] - s->diff_offset;
-            buf += coeff_stride;
-            for (int x = 0; x < w; x++)
-                buf[x+8] = pix[x+pixel_stride] - s->diff_offset;
-            buf += coeff_stride;
-        }
-
-        for (int y = 0; y < h*skip; y+=skip) {
-            int x;
-            /* left edge extension */
-            for (x = 0; x < 8; x+=2) {
-                buf[x]   = pix[0] - s->diff_offset;
-                buf[x+1] = pix[1] - s->diff_offset;
-            }
-            for (/*do nothing*/; x < w+8; x++) {
-                buf[x] = pix[x-8] - s->diff_offset;
-            }
-            /* right edge extention */
-            for (/*do nothing*/; x < w+16; x+=2) {
-                buf[x]   = pix[w-2] - s->diff_offset;
-                buf[x+1] = pix[w-1] - s->diff_offset;
+        for (int y = 0; y < h*skip && y < plane_lines_remaining; y+=skip) {
+            for (int x = 0; x < w; x++) {
+                buf[x] = pix[x] - s->diff_offset;
             }
             buf += coeff_stride;
             pix += pixel_stride;
         }
-
-        pix -= 2*pixel_stride;
-        /* bottom edge extention, TODO: interlace support */
-        for (int y = 0; y < 4; y++) {
-            for (int x = 0; x < w; x++)
-                buf[x+8] = pix[x] - s->diff_offset;
-            buf += coeff_stride;
-            for (int x = 0; x < w; x++)
-                buf[x+8] = pix[x+pixel_stride] - s->diff_offset;
-            buf += coeff_stride;
-        }
-
     } else {
         dwtcoef *buf = coeff_data;
         const uint16_t *pix = (const uint16_t *)ta->idata + offset;
-        for (int y = 0; y < h*skip; y+=skip) {
+        for (int y = 0; y < h*skip && y < plane_lines_remaining; y+=skip) {
             for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
@@ -1248,16 +1209,9 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         w >>= 1;
         h >>= 1;
-        t->vc2_subband_dwt[idx](transform_buf, coeff_data + 8*coeff_stride + 8, coeff_stride,
+        t->vc2_subband_dwt[idx](transform_buf, coeff_data, coeff_stride,
                 w, h);
     }
-
-    w = p->slice_w, h = p->slice_h;
-    //dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
-    for (int i = 0; i < p->slice_h; i++)
-        memcpy(p->coef_buf + x*p->slice_w + y*h*p->coef_stride + i*p->coef_stride,
-                s->dwt_slice_scratch[threadnr] + (i+8)*coeff_stride + 8,
-                p->slice_w * sizeof(dwtcoef));
 
     return 0;
 }
@@ -1612,14 +1566,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                 args->quant_idx = const_quant;
             }
         }
-    }
-
-    for (i = 0; i < avctx->thread_count; i++) {
-        s->dwt_slice_scratch[i] = av_malloc(sizeof(dwtcoef)
-                                            * (s->slice_width + 16)
-                                            * (s->slice_height + 16));
-        if (!s->dwt_slice_scratch[i])
-            goto alloc_fail;
     }
 
     /* Lookup tables */
