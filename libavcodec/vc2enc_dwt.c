@@ -155,6 +155,9 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
         synthl += synth_width;
         datal  += stride;
     }
+    //  FIXME: THERE'S THE FUCKING PROBLEM!  THIS SHIT MOVING INTO THE TEMP
+    //  BUFFER FOR THE TRANSFORM MEANS IT DOESN'T HAVE THE SOURCE PIXELS
+    //  AVAILABLE TO IT.  WHY?  WHO WROTE THAT.
 
     /* Horizontal synthesis. */
     synthl = synth;
