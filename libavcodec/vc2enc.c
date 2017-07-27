@@ -29,9 +29,6 @@
 #include "vc2enc_dwt.h"
 #include "diractab.h"
 
-#define NEW_SLICES 1
-#define THREADED_TRANSFORM 1
-
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
 #define COEF_LUT_TAB 2048

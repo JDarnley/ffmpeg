@@ -25,6 +25,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define NEW_SLICES 1
+#define THREADED_TRANSFORM 1
+
 typedef int32_t dwtcoef;
 
 enum VC2TransformType {
