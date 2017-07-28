@@ -137,6 +137,7 @@ static void vc2_subband_dwt_97(dwtcoef *synth, dwtcoef *data,
     deinterleave(data, stride, width, height, synth);
 }
 
+#if !NEW_SLICES
 static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
                                ptrdiff_t stride, int width, int height)
 {
@@ -179,14 +180,14 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
     }
 
     /* Vertical synthesis: Lifting stage 2. */
-    synthl = synth + synth_width;
+    synthl = synth + synth_width; // y=1
     for (x = 0; x < synth_width; x++)
         synthl[x] -= (synthl[x - synth_width] + synthl[x + synth_width] + 1) >> 1;
 
-    synthl = synth + (synth_width << 1);
+    synthl = synth + (synth_width << 1); // y=2
     for (y = 1; y < height - 1; y++) {
         for (x = 0; x < synth_width; x++)
-            synthl[x + synth_width] -= (synthl[x] + synthl[x + synth_width * 2] + 1) >> 1;
+            synthl[x + synth_width] /* y=3 */ -= (synthl[x] + synthl[x + synth_width * 2] + 1) >> 1;
         synthl += (synth_width << 1);
     }
 
@@ -195,11 +196,11 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
         synthl[x] -= (2*synthl[x - synth_width] + 1) >> 1;
 
     /* Vertical synthesis: Lifting stage 1. */
-    synthl = synth;
+    synthl = synth; // y=0
     for (x = 0; x < synth_width; x++)
         synthl[x] += (2*synthl[synth_width + x] + 2) >> 2;
 
-    synthl = synth + (synth_width << 1);
+    synthl = synth + (synth_width << 1); // y=2
     for (y = 1; y < height - 1; y++) {
         for (x = 0; x < synth_width; x++)
             synthl[x] += (synthl[x + synth_width] + synthl[x - synth_width] + 2) >> 2;
