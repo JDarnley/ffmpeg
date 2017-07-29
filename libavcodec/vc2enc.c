@@ -1181,6 +1181,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
         pixel_stride <<= 1;
     }
 
+#if 0
     if (s->bpp == 1) {
         dwtcoef *buf = coeff_data;
         const uint8_t *pix = (const uint8_t *)ta->idata + offset;
@@ -1202,6 +1203,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
             pix += pixel_stride;
         }
     }
+#endif
 
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         w >>= 1;
@@ -1229,6 +1231,35 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         s->transform_args[i].istride = frame->linesize[i];
         memset(p->coef_buf + p->height * p->coef_stride, 0,
                 sizeof(dwtcoef) * p->coef_stride * (p->align_h - p->height));
+
+#if NEW_SLICES
+        const int skip = 1;
+        const int offset = 0;
+        if (s->bpp == 1) {
+            dwtcoef *buf = p->coef_buf;
+            const uint8_t *pix = (const uint8_t *)frame->data[i] + offset;
+            for (int y = 0; y < p->height*skip; y+=skip) {
+                for (int x = 0; x < p->width; x++) {
+                    buf[x] = pix[x] - s->diff_offset;
+                }
+                buf += p->coef_stride;
+                pix += frame->linesize[i];
+            }
+        } else { // TODO
+#if 0
+            dwtcoef *buf = coeff_data;
+            const uint16_t *pix = (const uint16_t *)ta->idata + offset;
+            for (int y = 0; y < h*skip && y < plane_lines_remaining; y+=skip) {
+                for (int x = 0; x < w; x++) {
+                    buf[x] = pix[x] - s->diff_offset;
+                }
+                buf += coeff_stride;
+                pix += pixel_stride;
+            }
+#endif
+        }
+#endif
+
     }
 #if NEW_SLICES
 #if THREADED_TRANSFORM
