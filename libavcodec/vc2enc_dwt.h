@@ -52,4 +52,7 @@ typedef struct VC2TransformContext {
 int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_width, int p_height);
 void ff_vc2enc_free_transforms(VC2TransformContext *t);
 
+void ff_vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data, uint8_t *pixel,
+        ptrdiff_t stride, ptrdiff_t pixel_stride, int width, int height, int diff_offset);
+
 #endif /* AVCODEC_VC2ENC_DWT_H */
