@@ -41,10 +41,10 @@ static av_always_inline void deinterleave(dwtcoef *linell, ptrdiff_t stride,
         for (x = 0; x < width; x++) {
             linell[x] = synthl[(x << 1)];
             linehl[x] = synthl[(x << 1) + 1];
-            linelh[x] = synthl[(x << 1) + synthw];
-            linehh[x] = synthl[(x << 1) + synthw + 1];
+            linelh[x] = synthl[(x << 1) + stride];
+            linehh[x] = synthl[(x << 1) + stride + 1];
         }
-        synthl += synthw << 1;
+        synthl += stride << 1;
         linell += stride;
         linelh += stride;
         linehl += stride;
@@ -238,23 +238,23 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
             synthl[2*x] = a
                         + (synthl[2*x - 1] + synthl[2*x + 1] + 2 >> 2);
         }
-        synthl += synth_width;
+        synthl += stride;
         datal  += stride;
     }
 
     synthl = synth; // y=0
     for (y = 0; y < height; y++) {
         for (x = 0; x < synth_width; x++)
-            synthl[x + synth_width] = synthl[x + synth_width] // y=1
-                                    - (synthl[x] + synthl[x + synth_width * 2] + 1 >> 1);
-        synthl += (synth_width << 1);
+            synthl[x + stride] = synthl[x + stride] // y=1
+                                    - (synthl[x] + synthl[x + stride * 2] + 1 >> 1);
+        synthl += (stride << 1);
     }
     synthl = synth; // y=0
     for (y = 0; y < height; y++) {
         for (x = 0; x < synth_width; x++)
             synthl[x] = synthl[x] // y=0
-                      + (synthl[x + synth_width] + synthl[x - synth_width] + 2 >> 2);
-        synthl += (synth_width << 1);
+                      + (synthl[x + stride] + synthl[x - stride] + 2 >> 2);
+        synthl += (stride << 1);
     }
 
     deinterleave(data, stride, width, height, synth);
