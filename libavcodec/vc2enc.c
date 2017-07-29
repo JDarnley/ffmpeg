@@ -1181,7 +1181,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
         pixel_stride <<= 1;
     }
 
-#if 0
     if (s->bpp == 1) {
         dwtcoef *buf = coeff_data;
         const uint8_t *pix = (const uint8_t *)ta->idata + offset;
@@ -1203,14 +1202,12 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
             pix += pixel_stride;
         }
     }
-#endif
 
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         w >>= 1;
         h >>= 1;
-        ff_vc2_subband_dwt_53(transform_buf, coeff_data, ta->idata + offset,
-                coeff_stride, pixel_stride,
-                w, h, s->diff_offset);
+        t->vc2_subband_dwt[idx](transform_buf, coeff_data, coeff_stride,
+                w, h);
     }
 
     return 0;

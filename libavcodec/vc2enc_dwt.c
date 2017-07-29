@@ -137,6 +137,7 @@ static void vc2_subband_dwt_97(dwtcoef *synth, dwtcoef *data,
     deinterleave(data, stride, width, height, synth);
 }
 
+#if !NEW_SLICES
 static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
                                ptrdiff_t stride, int width, int height)
 {
@@ -214,29 +215,31 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
     deinterleave(data, stride, width, height, synth);
 }
 
-void ff_vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data, uint8_t *pixel,
-        ptrdiff_t stride, ptrdiff_t pixel_stride, int width, int height, int diff_offset)
+#else
+
+static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
+                               ptrdiff_t stride, int width, int height)
 {
     int x, y;
     dwtcoef *synthl = synth, *datal = data;
     const ptrdiff_t synth_width  = width  << 1;
     const ptrdiff_t synth_height = height << 1;
 
-    for (y = 0; y < synth_height; y++) {
+    for (y = 0;y < synth_height; y++) {
         for (x = 0; x < width; x++) {
-            dwtcoef a   = pixel[2*x] - diff_offset << 1;
-            dwtcoef ap1 = pixel[2*x + 1] - diff_offset << 1;
-            dwtcoef ap2 = pixel[2*x + 2] - diff_offset << 1;
+            dwtcoef a   = datal[2*x] << 1;
+            dwtcoef ap1 = datal[2*x + 1] << 1;
+            dwtcoef ap2 = datal[2*x + 2] << 1;
             synthl[2*x + 1] = ap1
                             - (a + ap2 + 1 >> 1);
         }
         for (x = 0; x < width; x++) {
-            dwtcoef a   = pixel[2*x] - diff_offset << 1;
+            dwtcoef a   = datal[2*x] << 1;
             synthl[2*x] = a
                         + (synthl[2*x - 1] + synthl[2*x + 1] + 2 >> 2);
         }
         synthl += stride;
-        pixel  += pixel_stride;
+        datal  += stride;
     }
 
     synthl = synth; // y=0
@@ -256,6 +259,7 @@ void ff_vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data, uint8_t *pixel,
 
     deinterleave(data, stride, width, height, synth);
 }
+#endif
 
 static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
                                       ptrdiff_t stride, int width, int height,
