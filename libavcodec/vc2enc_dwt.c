@@ -273,20 +273,20 @@ static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
     /* Horizontal synthesis. */
     for (y = 0; y < synth_height; y++) {
         for (x = 0; x < synth_width; x += 2) {
-            synthl[y*synth_width + x + 1] = (datal[y*stride + x + 1] << s) -
+            synthl[y*stride + x + 1] = (datal[y*stride + x + 1] << s) -
                                             (datal[y*stride + x] << s);
-            synthl[y*synth_width + x] = (datal[y*stride + x + 0] << s) +
-                                        ((synthl[y*synth_width + x + 1] + 1) >> 1);
+            synthl[y*stride + x] = (datal[y*stride + x + 0] << s) +
+                                        ((synthl[y*stride + x + 1] + 1) >> 1);
         }
     }
 
     /* Vertical synthesis. */
     for (x = 0; x < synth_width; x++) {
         for (y = 0; y < synth_height; y += 2) {
-            synthl[(y + 1)*synth_width + x] = synthl[(y + 1)*synth_width + x] -
-                                              synthl[y*synth_width + x];
-            synthl[y*synth_width + x] = synthl[y*synth_width + x] +
-                                        ((synthl[(y + 1)*synth_width + x] + 1) >> 1);
+            synthl[(y + 1)*stride + x] = synthl[(y + 1)*stride + x] -
+                                              synthl[y*stride + x];
+            synthl[y*stride + x] = synthl[y*stride + x] +
+                                        ((synthl[(y + 1)*stride + x] + 1) >> 1);
         }
     }
 
