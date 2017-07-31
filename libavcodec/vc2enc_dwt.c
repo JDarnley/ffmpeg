@@ -41,10 +41,10 @@ static av_always_inline void deinterleave(dwtcoef *linell, ptrdiff_t stride,
         for (x = 0; x < width; x++) {
             linell[x] = synthl[(x << 1)];
             linehl[x] = synthl[(x << 1) + 1];
-            linelh[x] = synthl[(x << 1) + stride];
-            linehh[x] = synthl[(x << 1) + stride + 1];
+            linelh[x] = synthl[(x << 1) + synthw];
+            linehh[x] = synthl[(x << 1) + synthw + 1];
         }
-        synthl += stride << 1;
+        synthl += synthw << 1;
         linell += stride;
         linelh += stride;
         linehl += stride;
@@ -152,12 +152,9 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
     for (y = 0; y < synth_height; y++) {
         for (x = 0; x < synth_width; x++)
             synthl[x] = datal[x] << 1;
-        synthl += stride;
+        synthl += synth_width;
         datal  += stride;
     }
-    //  FIXME: THERE'S THE FUCKING PROBLEM!  THIS SHIT MOVING INTO THE TEMP
-    //  BUFFER FOR THE TRANSFORM MEANS IT DOESN'T HAVE THE SOURCE PIXELS
-    //  AVAILABLE TO IT.  WHY?  WHO WROTE THAT.
 
     /* Horizontal synthesis. */
     synthl = synth;
@@ -175,40 +172,40 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
 
         synthl[synth_width - 2] += (synthl[synth_width - 3] + synthl[synth_width - 1] + 2) >> 2;
 
-        synthl += stride;
+        synthl += synth_width;
     }
 
     /* Vertical synthesis: Lifting stage 2. */
-    synthl = synth + stride; // y=1
+    synthl = synth + synth_width;
     for (x = 0; x < synth_width; x++)
-        synthl[x] -= (synthl[x - stride] + synthl[x + stride] + 1) >> 1;
+        synthl[x] -= (synthl[x - synth_width] + synthl[x + synth_width] + 1) >> 1;
 
-    synthl = synth + (stride << 1); // y=2
+    synthl = synth + (synth_width << 1);
     for (y = 1; y < height - 1; y++) {
         for (x = 0; x < synth_width; x++)
-            synthl[x + stride] /* y=3 */ -= (synthl[x] + synthl[x + stride * 2] + 1) >> 1;
-        synthl += (stride << 1);
+            synthl[x + synth_width] -= (synthl[x] + synthl[x + synth_width * 2] + 1) >> 1;
+        synthl += (synth_width << 1);
     }
 
-    synthl = synth + (synth_height - 1) * stride;
+    synthl = synth + (synth_height - 1) * synth_width;
     for (x = 0; x < synth_width; x++)
-        synthl[x] -= (2*synthl[x - stride] + 1) >> 1;
+        synthl[x] -= (2*synthl[x - synth_width] + 1) >> 1;
 
     /* Vertical synthesis: Lifting stage 1. */
-    synthl = synth; // y=0
+    synthl = synth;
     for (x = 0; x < synth_width; x++)
-        synthl[x] += (2*synthl[stride + x] + 2) >> 2;
+        synthl[x] += (2*synthl[synth_width + x] + 2) >> 2;
 
-    synthl = synth + (stride << 1); // y=2
+    synthl = synth + (synth_width << 1);
     for (y = 1; y < height - 1; y++) {
         for (x = 0; x < synth_width; x++)
-            synthl[x] += (synthl[x + stride] + synthl[x - stride] + 2) >> 2;
-        synthl += (stride << 1);
+            synthl[x] += (synthl[x + synth_width] + synthl[x - synth_width] + 2) >> 2;
+        synthl += (synth_width << 1);
     }
 
-    synthl = synth + (synth_height - 2)*stride;
+    synthl = synth + (synth_height - 2)*synth_width;
     for (x = 0; x < synth_width; x++)
-        synthl[x] += (synthl[x - stride] + synthl[x + stride] + 2) >> 2;
+        synthl[x] += (synthl[x - synth_width] + synthl[x + synth_width] + 2) >> 2;
 
 
     deinterleave(data, stride, width, height, synth);
@@ -226,20 +223,20 @@ static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
     /* Horizontal synthesis. */
     for (y = 0; y < synth_height; y++) {
         for (x = 0; x < synth_width; x += 2) {
-            synthl[y*stride + x + 1] = (datal[y*stride + x + 1] << s) -
+            synthl[y*synth_width + x + 1] = (datal[y*stride + x + 1] << s) -
                                             (datal[y*stride + x] << s);
-            synthl[y*stride + x] = (datal[y*stride + x + 0] << s) +
-                                        ((synthl[y*stride + x + 1] + 1) >> 1);
+            synthl[y*synth_width + x] = (datal[y*stride + x + 0] << s) +
+                                        ((synthl[y*synth_width + x + 1] + 1) >> 1);
         }
     }
 
     /* Vertical synthesis. */
     for (x = 0; x < synth_width; x++) {
         for (y = 0; y < synth_height; y += 2) {
-            synthl[(y + 1)*stride + x] = synthl[(y + 1)*stride + x] -
-                                              synthl[y*stride + x];
-            synthl[y*stride + x] = synthl[y*stride + x] +
-                                        ((synthl[(y + 1)*stride + x] + 1) >> 1);
+            synthl[(y + 1)*synth_width + x] = synthl[(y + 1)*synth_width + x] -
+                                              synthl[y*synth_width + x];
+            synthl[y*synth_width + x] = synthl[y*synth_width + x] +
+                                        ((synthl[(y + 1)*synth_width + x] + 1) >> 1);
         }
     }
 
