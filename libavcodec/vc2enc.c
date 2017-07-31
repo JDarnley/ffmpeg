@@ -1173,14 +1173,15 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
 //                plane_lines_remaining);
 
     ptrdiff_t offset = x*w + y*h*pixel_stride;
+#if 0
     if (field == 1) {
         pixel_stride <<= 1;
     } else if (field == 2) {
         offset += pixel_stride;
         pixel_stride <<= 1;
     }
+#endif
 
-#if 0
     if (s->bpp == 1) {
         dwtcoef *buf = coeff_data;
         const uint8_t *pix = (const uint8_t *)ta->idata + offset;
@@ -1202,7 +1203,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
             pix += pixel_stride;
         }
     }
-#endif
 
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         w >>= 1;
@@ -1231,7 +1231,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         memset(p->coef_buf + p->height * p->coef_stride, 0,
                 sizeof(dwtcoef) * p->coef_stride * (p->align_h - p->height));
 
-#if NEW_SLICES
+#if 0
         const int skip = 1;
         const int offset = 0;
         if (s->bpp == 1) {
