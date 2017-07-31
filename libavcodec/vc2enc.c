@@ -1383,10 +1383,20 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         h             = FFALIGN(h, slice_h);
         p->align_w    = w;
         p->align_h    = h;
+
+        if (!i) {
+            s->num_x = w / slice_w;
+            s->num_y = h / slice_h;
+        }
+        w = s->num_x * (slice_w + 2*SLICE_PADDING_H);
+        h = s->num_y * (slice_h + 2*SLICE_PADDING_V);
+
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
+
         p->coef_buf = av_mallocz(w*h*sizeof(dwtcoef));
         if (!p->coef_buf)
             goto alloc_fail;
+
         /* DWT init */
         if (ff_vc2enc_init_transforms(&s->transform_args[i].t, w, h, slice_w, slice_h))
             goto alloc_fail;
@@ -1420,9 +1430,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     }
 
     /* Slices */
-    s->num_x = s->plane[0].align_w/s->slice_width;
-    s->num_y = s->plane[0].align_h/s->slice_height;
-
     s->slice_args = av_calloc(s->num_x*s->num_y, sizeof(SliceArgs));
     if (!s->slice_args)
         goto alloc_fail;
