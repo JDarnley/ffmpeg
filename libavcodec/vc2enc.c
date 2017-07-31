@@ -604,107 +604,7 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
     }
 }
 
-static void encode_subband(VC2EncContext *s, PutBitContext *pb, int sx, int sy,
-                           SubBand *b, int quant)
-{
-    int x, y;
-
-    const int left   = b->width  * (sx+0) / s->num_x;
-    const int right  = b->width  * (sx+1) / s->num_x;
-    const int top    = b->height * (sy+0) / s->num_y;
-    const int bottom = b->height * (sy+1) / s->num_y;
-
-    const int qfactor = ff_dirac_qscale_tab[quant];
-    const uint8_t  *len_lut = &s->coef_lut_len[quant*COEF_LUT_TAB];
-    const uint32_t *val_lut = &s->coef_lut_val[quant*COEF_LUT_TAB];
-
-    dwtcoef *coeff = b->buf + top * b->stride;
-
-    if (!sx || !sy)
-        av_log(s->avctx, AV_LOG_DEBUG, "Slice[%d,%d] width: %d, height: %d\n",
-                sx, sy, right-left, bottom-top);
-
-    for (y = top; y < bottom; y++) {
-        for (x = left; x < right; x++) {
-            const int neg = coeff[x] < 0;
-            uint32_t c_abs = FFABS(coeff[x]);
-            if (c_abs < COEF_LUT_TAB) {
-                put_bits(pb, len_lut[c_abs], val_lut[c_abs] | neg);
-            } else {
-                c_abs = QUANT(c_abs, qfactor);
-                put_vc2_ue_uint(pb, c_abs);
-                if (c_abs)
-                    put_bits(pb, 1, neg);
-            }
-        }
-        coeff += b->stride;
-    }
-}
-
-static int count_hq_slice1(SliceArgs *slice, int quant_idx)
-{
-    int x, y;
-    uint8_t quants[MAX_DWT_LEVELS][4];
-    int bits = 0, p, level, orientation;
-    VC2EncContext *s = slice->ctx;
-
-    if (slice->cache[quant_idx])
-        return slice->cache[quant_idx];
-
-    bits += 8*s->prefix_bytes;
-    bits += 8; /* quant_idx */
-
-    for (level = 0; level < s->wavelet_depth; level++)
-        for (orientation = !!level; orientation < 4; orientation++)
-            quants[level][orientation] = FFMAX(quant_idx - s->quant[level][orientation], 0);
-
-    for (p = 0; p < 3; p++) {
-        int bytes_start, bytes_len, pad_s, pad_c;
-        bytes_start = bits >> 3;
-        bits += 8;
-        for (level = 0; level < s->wavelet_depth; level++) {
-            for (orientation = !!level; orientation < 4; orientation++) {
-                SubBand *b = &s->plane[p].band[level][orientation];
-
-                const int q_idx = quants[level][orientation];
-                const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
-                const int qfactor = ff_dirac_qscale_tab[q_idx];
-
-                const int left   = b->width  * slice->x    / s->num_x;
-                const int right  = b->width  *(slice->x+1) / s->num_x;
-                const int top    = b->height * slice->y    / s->num_y;
-                const int bottom = b->height *(slice->y+1) / s->num_y;
-
-                dwtcoef *buf = b->buf + top * b->stride;
-
-                for (y = top; y < bottom; y++) {
-                    for (x = left; x < right; x++) {
-                        uint32_t c_abs = FFABS(buf[x]);
-                        if (c_abs < COEF_LUT_TAB) {
-                            bits += len_lut[c_abs];
-                        } else {
-                            c_abs = QUANT(c_abs, qfactor);
-                            bits += count_vc2_ue_uint(c_abs);
-                            bits += !!c_abs;
-                        }
-                    }
-                    buf += b->stride;
-                }
-            }
-        }
-        bits += FFALIGN(bits, 8) - bits;
-        bytes_len = (bits >> 3) - bytes_start - 1;
-        pad_s = FFALIGN(bytes_len, s->size_scaler)/s->size_scaler;
-        pad_c = (pad_s*s->size_scaler) - bytes_len;
-        bits += pad_c*8;
-    }
-
-    slice->cache[quant_idx] = bits;
-
-    return bits;
-}
-
-static int count_hq_slice2(SliceArgs *slice, int quant_idx)
+static int count_hq_slice(SliceArgs *slice, int quant_idx)
 {
     int i, x, y, level, orientation;
     uint8_t quants[MAX_DWT_LEVELS][4];
@@ -766,12 +666,6 @@ static int count_hq_slice2(SliceArgs *slice, int quant_idx)
 
     return bits;
 }
-
-#if NEW_SLICES
-#define count_hq_slice count_hq_slice2
-#else
-#define count_hq_slice count_hq_slice1
-#endif
 
 /* Approaches the best possible quantizer asymptotically, its kinda exaustive
  * but we have a LUT to get the coefficient size in bits. Guaranteed to never
@@ -908,15 +802,9 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
         put_bits(pb, 8, 0);
         for (level = 0; level < s->wavelet_depth; level++) {
             for (orientation = !!level; orientation < 4; orientation++) {
-#if NEW_SLICES
                 encode_subband2(s, pb, p, slice_x, slice_y,
                                &p->band[level][orientation],
                                quants[level][orientation]);
-#else
-                encode_subband(s, pb, slice_x, slice_y,
-                               &p->band[level][orientation],
-                               quants[level][orientation]);
-#endif
             }
         }
         avpriv_align_put_bits(pb);
@@ -1097,7 +985,6 @@ static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
                     const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
                     const int qfactor = ff_dirac_qscale_tab[q_idx];
 
-#if NEW_SLICES
                     const int left = b->left;
                     const int top  = b->top;
                     const int right = b->right;
@@ -1106,14 +993,6 @@ static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
                                  + slice->x * plane->slice_w
                                  + slice->y * plane->slice_h * plane->coef_stride
                                  + b->top * plane->coef_stride;
-#else
-                    const int left   = b->width  * slice->x    / s->num_x;
-                    const int right  = b->width  *(slice->x+1) / s->num_x;
-                    const int top    = b->height * slice->y    / s->num_y;
-                    const int bottom = b->height *(slice->y+1) / s->num_y;
-
-                    dwtcoef *buf = b->buf + top * b->stride;
-#endif
 
                     for (y = top; y < bottom; y++) {
                         for (x = left; x < right; x++) {
@@ -1233,17 +1112,12 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         memset(p->coef_buf + p->height * p->coef_stride, 0,
                 sizeof(dwtcoef) * p->coef_stride * (p->align_h - p->height));
     }
-#if NEW_SLICES
 #if THREADED_TRANSFORM
     s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
             s->num_x*s->num_y*3);
 #else
     for (i = 0; i < s->num_x*s->num_y*3; i++)
         dwt_slice(s->avctx, NULL, i, 0);
-#endif
-#else
-    s->avctx->execute(s->avctx, dwt_plane, s->transform_args, NULL, 3,
-                      sizeof(TransformArgs));
 #endif
 
     /* Calculate per-slice quantizers and sizes */
@@ -1547,13 +1421,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     }
 
     /* Slices */
-#if NEW_SLICES
     s->num_x = s->plane[0].align_w/s->slice_width;
     s->num_y = s->plane[0].align_h/s->slice_height;
-#else
-    s->num_x = s->plane[0].dwt_width/s->slice_width;
-    s->num_y = s->plane[0].dwt_height/s->slice_height;
-#endif
 
     s->slice_args = av_calloc(s->num_x*s->num_y, sizeof(SliceArgs));
     if (!s->slice_args)
