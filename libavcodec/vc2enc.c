@@ -1096,6 +1096,97 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     return 0;
 }
 
+static void copy_pixels(dwtcoef* dst, const void *_src,
+        ptrdiff_t dst_stride, ptrdiff_t src_stride,
+        int w, int h, int diff_offset, int bpp)
+{
+    int x, y;
+    if (bpp == 1) {
+        const uint8_t *src = (const uint8_t*)_src;
+        for (y = 0; y < h; y++) {
+            for (x = 0; x < w; x++) {
+                dst[x] = src[x] - diff_offset;
+            }
+            dst += dst_stride;
+            src += src_stride;
+        }
+    } else {
+        const uint16_t *src = (const uint16_t*)_src;
+        src_stride >>= 1; /* change from byte count to value count */
+        for (y = 0; y < h; y++) {
+            for (x = 0; x < w; x++) {
+                dst[x] = src[x] - diff_offset;
+            }
+            dst += dst_stride;
+            src += src_stride;
+        }
+    }
+}
+
+static void copy_slice(VC2EncContext *s, Plane *p,
+        const uint8_t *pixel_data, ptrdiff_t pixel_stride,
+        int x, int y)
+{
+    int w        = p->slice_w;
+    int h        = p->slice_h;
+    int padded_w = w + 2*SLICE_PADDING_H;
+    int padded_h = h + 2*SLICE_PADDING_V;
+
+    /* pixel frame stride is in bytes but sample size is needed */
+    pixel_stride >>= (s->bpp - 1);
+    /* coeff stride is in number of values */
+    ptrdiff_t coeff_stride = p->coef_stride;
+    dwtcoef *coeff_data    = p->coef_buf;
+
+    /* top */
+    if (y == 0) {
+        /* top-left */
+        if (x == 0) {
+        }
+
+        /* top-right */
+        if (x == s->num_x-1) {
+        }
+
+        /* top */
+        else {
+        }
+    }
+
+    /* bottom */
+    else if (y == s->num_y-1) {
+        /* bottom-left */
+        if (x == 0) {
+        }
+
+        /* bottom-right */
+        if (x == s->num_x-1) {
+        }
+
+        /* bottom */
+        else {
+        }
+    }
+
+    /* left */
+    else if (x == 0) {
+    }
+
+    /* left */
+    else if (x == s->num_x-1) {
+    }
+
+    /* center */
+    else {
+        coeff_data += x * padded_w + y * coeff_stride * padded_h; /* move to top-left corner of padded slice */
+        pixel_data += x * w        + y * pixel_stride * h /* move to top-left corner of slice */
+                    - SLICE_PADDING_V * pixel_stride      /* go back padding rows */
+                    - SLICE_PADDING_H;                    /* go back padding cols */
+        copy_pixels(coeff_data, pixel_data, coeff_stride, pixel_stride,
+                padded_w, padded_h, s->diff_offset, s->bpp);
+    }
+}
+
 static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                         const char *aux_data, const int header_size, int field)
 {
@@ -1112,6 +1203,10 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         s->transform_args[i].istride = frame->linesize[i];
         memset(p->coef_buf + p->height * p->coef_stride, 0,
                 sizeof(dwtcoef) * p->coef_stride * (p->align_h - p->height));
+
+        for (int y = 0; y < s->num_y; y++)
+            for (int x = 0; x < s->num_x; x++)
+                copy_slice(s, p, frame->data[i], frame->linesize[i], x, y);
     }
 #if THREADED_TRANSFORM
     s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
