@@ -1054,6 +1054,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
 //        av_log(avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
 //                plane_lines_remaining);
 
+#if 0
     ptrdiff_t offset = x*w + y*h*pixel_stride;
     if (field == 1) {
         pixel_stride <<= 1;
@@ -1083,6 +1084,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
             pix += pixel_stride;
         }
     }
+#endif
 
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         w >>= 1;
