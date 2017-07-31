@@ -5347,6 +5347,7 @@ Available values for component modes are:
 @item darken
 @item difference
 @item grainextract
+@item differencemax
 @item divide
 @item dodge
 @item freeze
