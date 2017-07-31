@@ -225,7 +225,7 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
     const ptrdiff_t synth_width  = width  << 1;
     const ptrdiff_t synth_height = height << 1;
 
-    for (y = 0;y < synth_height; y++) {
+    for (y = 0; y < synth_height; y++) {
         for (x = 0; x < width; x++) {
             dwtcoef a   = datal[2*x] << 1;
             dwtcoef ap1 = datal[2*x + 1] << 1;
