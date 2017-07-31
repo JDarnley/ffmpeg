@@ -1168,7 +1168,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
     dwtcoef *transform_buf = t->buffer   + x*w + y*h*coeff_stride;
 
-    int plane_lines_remaining = p->height - y*h;
 //    if (!x)
 //        av_log(avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
 //                plane_lines_remaining);
@@ -1185,7 +1184,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     if (s->bpp == 1) {
         dwtcoef *buf = coeff_data;
         const uint8_t *pix = (const uint8_t *)ta->idata + offset;
-        for (int y = 0; y < h*skip && y < plane_lines_remaining; y+=skip) {
+        for (int y = 0; y < h*skip; y+=skip) {
             for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
@@ -1195,7 +1194,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     } else {
         dwtcoef *buf = coeff_data;
         const uint16_t *pix = (const uint16_t *)ta->idata + offset;
-        for (int y = 0; y < h*skip && y < plane_lines_remaining; y+=skip) {
+        for (int y = 0; y < h*skip; y+=skip) {
             for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
