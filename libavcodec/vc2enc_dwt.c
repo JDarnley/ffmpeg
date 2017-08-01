@@ -28,7 +28,8 @@
  * rearranges the coefficients into the more traditional subdivision,
  * making it easier to encode and perform another level. */
 static av_always_inline void deinterleave(dwtcoef *linell, ptrdiff_t stride,
-                                          int width, int height, dwtcoef *synthl)
+                                          int width, int height, dwtcoef *synthl,
+                                          ptrdiff_t synth_stride)
 {
     int x, y;
     ptrdiff_t synthw = width << 1;
@@ -41,10 +42,10 @@ static av_always_inline void deinterleave(dwtcoef *linell, ptrdiff_t stride,
         for (x = 0; x < width; x++) {
             linell[x] = synthl[(x << 1)];
             linehl[x] = synthl[(x << 1) + 1];
-            linelh[x] = synthl[(x << 1) + synthw];
-            linehh[x] = synthl[(x << 1) + synthw + 1];
+            linelh[x] = synthl[(x << 1) + synth_stride];
+            linehh[x] = synthl[(x << 1) + synth_stride + 1];
         }
-        synthl += synthw << 1;
+        synthl += 2*synth_stride;
         linell += stride;
         linelh += stride;
         linehl += stride;
@@ -134,7 +135,7 @@ static void vc2_subband_dwt_97(dwtcoef *synth, dwtcoef *data,
     for (x = 0; x < synth_width; x++)
         synthl[x] += (synthl[x - synth_width] + synthl[x + synth_width] + 2) >> 2;
 
-    deinterleave(data, stride, width, height, synth);
+    deinterleave(data, stride, width, height, synth, synth_width);
 }
 
 static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
@@ -208,7 +209,7 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
         synthl[x] += (synthl[x - synth_width] + synthl[x + synth_width] + 2) >> 2;
 
 
-    deinterleave(data, stride, width, height, synth);
+    deinterleave(data, stride, width, height, synth, synth_width);
 }
 
 static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
@@ -240,7 +241,7 @@ static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
         }
     }
 
-    deinterleave(data, stride, width, height, synth);
+    deinterleave(data, stride, width, height, synth, synth_width);
 }
 
 static void vc2_subband_dwt_haar(dwtcoef *synth, dwtcoef *data,
