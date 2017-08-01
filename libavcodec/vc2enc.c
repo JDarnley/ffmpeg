@@ -108,6 +108,7 @@ typedef struct Plane {
     ptrdiff_t coef_stride;
     int slice_w, slice_h;
     int align_w, align_h;
+    int padded_slice_w, padded_slice_h;
 } Plane;
 
 typedef struct SliceArgs {
@@ -1129,8 +1130,8 @@ static void copy_slice(VC2EncContext *s, Plane *p,
 {
     int w        = p->slice_w;
     int h        = p->slice_h;
-    int padded_w = w + 2*SLICE_PADDING_H;
-    int padded_h = h + 2*SLICE_PADDING_V;
+    int padded_w = p->padded_slice_w;
+    int padded_h = p->padded_slice_h;
 
     /* pixel frame stride is in bytes but sample size is needed */
     pixel_stride >>= (s->bpp - 1);
@@ -1475,6 +1476,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->dwt_height = h;
         p->slice_w    = slice_w;
         p->slice_h    = slice_h;
+        p->padded_slice_w = slice_w + 2*SLICE_PADDING_H;
+        p->padded_slice_h = slice_h + 2*SLICE_PADDING_V;
 
         w             = FFALIGN(w, slice_w);
         h             = FFALIGN(h, slice_h);
@@ -1485,8 +1488,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
             s->num_x = w / slice_w;
             s->num_y = h / slice_h;
         }
-        w = s->num_x * (slice_w + 2*SLICE_PADDING_H);
-        h = s->num_y * (slice_h + 2*SLICE_PADDING_V);
+        w = s->num_x * p->padded_slice_w;
+        h = s->num_y * p->padded_slice_h;
 
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
 
