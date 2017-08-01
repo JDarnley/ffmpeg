@@ -1108,12 +1108,12 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
 }
 
 static void copy_pixels(dwtcoef* dst, const void *_src,
-        ptrdiff_t dst_stride, ptrdiff_t src_stride,
+        ptrdiff_t dst_stride, ptrdiff_t src_stride, ptrdiff_t src_offset,
         int w, int h, int diff_offset, int bpp)
 {
     int x, y;
     if (bpp == 1) {
-        const uint8_t *src = (const uint8_t*)_src;
+        const uint8_t *src = (const uint8_t*)_src + src_offset;
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
                 dst[x] = src[x] - diff_offset;
@@ -1122,7 +1122,7 @@ static void copy_pixels(dwtcoef* dst, const void *_src,
             src += src_stride;
         }
     } else {
-        const uint16_t *src = (const uint16_t*)_src;
+        const uint16_t *src = (const uint16_t*)_src + src_offset;
         src_stride >>= 1; /* change from byte count to value count */
         for (y = 0; y < h; y++) {
             for (x = 0; x < w; x++) {
@@ -1196,7 +1196,8 @@ static void copy_slice(VC2EncContext *s, Plane *p,
                     /* go back padding cols */
                     - SLICE_PADDING_H;
         /* copy all pixels for slice and padding */
-        copy_pixels(coeff_data, pixel_data, coeff_stride, pixel_stride,
+        copy_pixels(coeff_data, pixel_data,
+                coeff_stride, pixel_stride, 0,
                 padded_w, padded_h, s->diff_offset, s->bpp);
     }
 }
