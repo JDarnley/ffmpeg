@@ -1143,8 +1143,6 @@ static void copy_slice(VC2EncContext *s, Plane *p,
     int padded_w = p->padded_slice_w;
     int padded_h = p->padded_slice_h;
 
-    /* pixel frame stride is in bytes but sample size is needed */
-    pixel_stride >>= (s->bpp - 1);
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
     dwtcoef *coeff_data    = p->coef_buf;
