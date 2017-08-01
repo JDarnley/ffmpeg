@@ -1189,10 +1189,15 @@ static void copy_slice(VC2EncContext *s, Plane *p,
 
     /* center */
     else {
-        coeff_data += x * padded_w + y * coeff_stride * padded_h; /* move to top-left corner of padded slice */
-        pixel_data += x * w        + y * pixel_stride * h /* move to top-left corner of slice */
-                    - SLICE_PADDING_V * pixel_stride      /* go back padding rows */
-                    - SLICE_PADDING_H;                    /* go back padding cols */
+        /* move to top-left corner of padded slice */
+        coeff_data += x * padded_w + y * coeff_stride * padded_h;
+        /* move to top-left corner of slice */
+        pixel_data += x * w        + y * pixel_stride * h
+                    /* go back padding rows */
+                    - SLICE_PADDING_V * pixel_stride
+                    /* go back padding cols */
+                    - SLICE_PADDING_H;
+        /* copy all pixels for slice and padding */
         copy_pixels(coeff_data, pixel_data, coeff_stride, pixel_stride,
                 padded_w, padded_h, s->diff_offset, s->bpp);
     }
