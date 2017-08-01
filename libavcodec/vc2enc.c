@@ -1059,7 +1059,9 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
                            + y*padded_h*coeff_stride /* move to top-left of padded slice */
                            + SLICE_PADDING_H
                            + SLICE_PADDING_V * coeff_stride; /* move to top-left of true slice */
-    dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
+    dwtcoef *transform_buf = t->buffer
+                           + x*padded_w*padded_h
+                           + y*padded_w*padded_h*s->num_x;
 
 //    if (!x)
 //        av_log(avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
