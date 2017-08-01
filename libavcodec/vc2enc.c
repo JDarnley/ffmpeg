@@ -580,9 +580,11 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
     const uint32_t *val_lut = &s->coef_lut_val[quant*COEF_LUT_TAB];
 
     dwtcoef *coeff = p->coef_buf
-                   + sx*p->slice_w
-                   + sy*p->slice_h*p->coef_stride
-                   + b->top*p->coef_stride;
+                   + sx*p->padded_slice_w
+                   + sy*p->padded_slice_h*p->coef_stride
+                   + b->top*p->coef_stride
+                   + SLICE_PADDING_H /* skip over padding */
+                   + SLICE_PADDING_V * p->coef_stride;
 
 //    if (!sx && p == &s->plane[0])
 //        av_log(s->avctx, AV_LOG_VERBOSE, "%s: Slice[%d,%d] first line %d\n",
@@ -991,9 +993,11 @@ static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
                     const int right = b->right;
                     const int bottom = b->bottom;
                     dwtcoef *buf = plane->coef_buf
-                                 + slice->x * plane->slice_w
-                                 + slice->y * plane->slice_h * plane->coef_stride
-                                 + b->top * plane->coef_stride;
+                                 + slice->x * plane->padded_slice_w
+                                 + slice->y * plane->padded_slice_h * plane->coef_stride
+                                 + b->top * plane->coef_stride
+                                 + SLICE_PADDING_H /* skip over padding */
+                                 + SLICE_PADDING_V * plane->coef_stride;
 
                     for (y = top; y < bottom; y++) {
                         for (x = left; x < right; x++) {
@@ -1039,6 +1043,8 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
 
     int w = p->slice_w, h = p->slice_h;
     int x = slice->x,   y = slice->y;
+    int padded_w = p->padded_slice_w;
+    int padded_h = p->padded_slice_h;
 
 //    if (/*!i_plane &&*/ (!x || !y))
 //        av_log(avctx, AV_LOG_VERBOSE, "transforming plane[%d] slice[%d,%d]\n",
@@ -1048,7 +1054,11 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     ptrdiff_t pixel_stride = ta->istride >> (s->bpp - 1);
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
-    dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
+    dwtcoef *coeff_data    = p->coef_buf
+                           + x*padded_w
+                           + y*padded_h*coeff_stride /* move to top-left of padded slice */
+                           + SLICE_PADDING_H
+                           + SLICE_PADDING_V * coeff_stride; /* move to top-left of true slice */
     dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
 //    if (!x)
