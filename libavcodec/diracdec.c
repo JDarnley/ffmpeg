@@ -565,7 +565,7 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 
     ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
 
-    for (y = 0; y < p->height; y += 16) {
+    for (y = p->transformed_row_count; y < p->height; y += 16) {
         ff_spatial_idwt_slice2(&d, y+16); /* decode */
         s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
                                                  ostride,
@@ -592,7 +592,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
     if ((ret = decode_lowdelay(s)) < 0)
         return ret;
 
-#if 0
+#if 1
     s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
 #endif
 
