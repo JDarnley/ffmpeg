@@ -77,6 +77,8 @@ typedef struct Plane {
     ptrdiff_t stride;
 
     SubBand band[MAX_DWT_LEVELS][4];
+
+    int decoded_row_count, transformed_row_count;
 } Plane;
 
 /* Used by Low Delay and High Quality profiles */
@@ -328,6 +330,37 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
     uint8_t *thread_buf = &s->thread_buf[s->thread_buf_size*threadnr];
     for (i = 0; i < s->num_x; i++)
         decode_hq_slice(s, &slices[i], thread_buf);
+
+#if 1
+    for (i = 0; i < 3; i++) {
+        Plane *p          = &s->plane[i];
+        int slice_height = (jobnr+1) * p->height / s->num_y
+                         - jobnr * p->height / s->num_y;
+        p->decoded_row_count += slice_height;
+
+        if (p->transformed_row_count + 16 <= p->decoded_row_count ) {
+            DWTContext d;
+            uint8_t *frame    = s->current_picture->data[i];
+            const int idx     = (s->bit_depth - 8) >> 1;
+            const int ostride = p->stride << s->field_coding;
+
+            frame += s->cur_field * p->stride;
+
+            ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
+            for (int y = p->transformed_row_count;
+                    y+16 <= p->decoded_row_count;
+                    y += 16, p->transformed_row_count = y) {
+                ff_spatial_idwt_slice2(&d, y+16); /* decode */
+                s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
+                                                        ostride,
+                                                        p->idwt.buf + y*p->idwt.stride,
+                                                        p->idwt.stride, p->width, 16);
+            }
+
+        }
+    }
+#endif
+
     return 0;
 }
 
@@ -407,7 +440,12 @@ static int decode_lowdelay(DiracContext *s)
         return AVERROR_INVALIDDATA;
     }
 
+#if 0
     avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, s->num_y);
+#else
+    for (int i = 0; i < s->num_y; i++)
+        decode_hq_slice_row(s->avctx, slices, i, 0);
+#endif
 
     return 0;
 }
@@ -546,10 +584,17 @@ static int dirac_decode_frame_internal(DiracContext *s)
 {
     int ret;
 
+    for (int i = 0; i < 3; i++) {
+        s->plane[i].transformed_row_count = 0;
+        s->plane[i].decoded_row_count = 0;
+    }
+
     if ((ret = decode_lowdelay(s)) < 0)
         return ret;
 
+#if 0
     s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
+#endif
 
     return 0;
 }
