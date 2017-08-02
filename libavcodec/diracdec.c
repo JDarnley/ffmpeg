@@ -338,6 +338,12 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
                          - jobnr * p->height / s->num_y;
         p->decoded_row_count += slice_height;
 
+        if (i==0) av_log(avctx, AV_LOG_INFO, "  Luma row: %d, height: %d, dec lines: %d, trans lines :%d\n",
+                jobnr, slice_height, p->decoded_row_count, p->transformed_row_count);
+
+        if (i==1) av_log(avctx, AV_LOG_INFO, "Chroma row: %d, height: %d, dec lines: %d, trans lines :%d\n",
+                jobnr, slice_height, p->decoded_row_count, p->transformed_row_count);
+
         if (p->transformed_row_count + 16 <= p->decoded_row_count ) {
             DWTContext d;
             uint8_t *frame    = s->current_picture->data[i];
