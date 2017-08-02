@@ -85,7 +85,6 @@ typedef struct DiracSlice {
     int slice_x;
     int slice_y;
     int bytes;
-    int width, height;
 } DiracSlice;
 
 typedef struct DiracContext {
@@ -130,10 +129,7 @@ typedef struct DiracContext {
     uint64_t size_scaler;
 
     AVFrame *dummy_frame, *prev_field, *current_picture;
-    FILE *dump;
 } DiracContext;
-
-static int first_slice_decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf);
 
 static int alloc_sequence_buffers(DiracContext *s)
 {
@@ -246,68 +242,16 @@ static int subband_coeffs(DiracContext *s, int x, int y, int p,
     return coef;
 }
 
-#if 0
-static int idwt_hack_slice(AVCodecContext *avctx, DiracContext *s, Plane *p,
-        int w, int h, int stride, uint8_t *dst, uint8_t *src)
-
-{
-    const int idx     = (s->bit_depth - 8) >> 1;
-    const int ostride = p->stride << s->field_coding;
-
-    DWTContext d = {
-        .width = w,
-        .height = h,
-        .stride = stride,
-        .decomposition_count = s->wavelet_depth,
-        .support = 1,
-    };
-    ff_idwt_hack_init(&d, s->wavelet_idx + 2);
-
-    for (int y = 0; y < h; y += 16) {
-        {
-            int y = y + 16, support = d.support;
-            for (int level = d.decomposition_count-1; level >= 0; level--) {
-                int wl = d.width  >> level;
-                int hl = d.height >> level;
-                int stride_l = d.stride << level;
-
-                while (d.cs[level].y <= FFMIN((y>>level)+support, hl))
-                    d.spatial_compose(&d, level, wl, hl, stride_l);
-            }
-        }
-#if 0
-        s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
-                ostride,
-                p->idwt.buf + y*p->idwt.stride,
-                p->idwt.stride, p->width, 16);
-#endif
-
-    }
-
-    return 0;
-}
-#endif
-
 /**
  * VC-2 Specification ->
  * 13.5.3 hq_slice(sx,sy)
  */
 static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
 {
-    static int first_slice = 1;
     int i, level, orientation, quant_idx;
     int qfactor[MAX_DWT_LEVELS][4], qoffset[MAX_DWT_LEVELS][4];
     GetBitContext *gb = &slice->gb;
     SliceCoeffs coeffs_num[MAX_DWT_LEVELS];
-
-    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
-
-#if 0
-    if (first_slice) {
-        first_slice = 0;
-        return first_slice_decode_hq_slice(s, slice, tmp_buf);
-    }
-#endif
 
     skip_bits_long(gb, 8*s->prefix_bytes);
     quant_idx = get_bits(gb, 8);
@@ -355,23 +299,12 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
 
         for (level = 0; level < s->wavelet_depth; level++) {
             const SliceCoeffs *c = &coeffs_num[level];
-
-            if (first_slice && !i) av_log(s->avctx, AV_LOG_VERBOSE, "  plane: %d, level: %d, SliceCoeffs { left: %d, top: %d, tot_h: %d, tot_v: %d, tot: %d }\n",
-                    i, level, c->left, c->top, c->tot_h, c->tot_v, c->tot);
-
             for (orientation = !!level; orientation < 4; orientation++) {
                 const SubBand *b1 = &s->plane[i].band[level][orientation];
                 uint8_t *buf = b1->ibuf + c->top * b1->stride + (c->left << (s->pshift + 1));
+
                 /* Change to c->tot_h <= 4 for AVX2 dequantization */
                 const int qfunc = s->pshift + 2*(c->tot_h <= 2);
-
-                if (first_slice && !i) av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d, stride: %d\n",
-                        orientation,
-                        b1->ibuf,
-                        buf,
-                        (int)(c->top * b1->stride + (c->left << (s->pshift + 1))),
-                        b1->stride);
-
                 s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], buf, b1->stride,
                                                    qfactor[level][orientation],
                                                    qoffset[level][orientation],
@@ -384,170 +317,8 @@ static int decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
         skip_bits_long(gb, bits_end - get_bits_count(gb));
     }
 
-    {
-    DWTContext d;
-    Plane *p = &s->plane[0];
-    const int idx     = (s->bit_depth - 8) >> 1;
-    const int ostride = p->stride << s->field_coding;
-    int y_fuck_you[8] = {1,1,1,1,1,1,1,1};
-    uint8_t *frame = s->current_picture->data[0]
-        + slice->slice_x*32
-        + slice->slice_y*64*ostride;
-
-    ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2, s->wavelet_depth, s->bit_depth);
-
-    for (int y = 0; y < 64; y += 16) {
-        //ff_spatial_idwt_slice3(&d, y+16, w, h);
-        for (int level = s->wavelet_depth - 1; level >= 0; level--) {
-            int wl = 32 >> level;
-            int hl = 64 >> level;
-            ptrdiff_t stride_l = p->idwt.stride << level;
-            while (y_fuck_you[level] <= FFMIN(((y+16) >> level) + 1, hl)) {
-                uint8_t *b0 = d.buffer + (y_fuck_you[level]-1) * stride_l;
-                uint8_t *b1 = d.buffer + (y_fuck_you[level]) * stride_l;
-                ((vertical_compose_2tap)d.vertical_compose)(b0, b1, wl);
-                d.horizontal_compose(b0, d.temp, wl);
-                d.horizontal_compose(b1, d.temp, wl);
-                y_fuck_you[level] += 2;
-            }
-        }
-
-        s->diracdsp.put_signed_rect_clamped[idx](
-                frame + y*ostride,
-                ostride,
-                p->idwt.buf + y*p->idwt.stride,
-                p->idwt.stride, 32, 16);
-    }
-    }
-
-    first_slice = 0;
     return 0;
 }
-
-#if 0
-static int first_slice_decode_hq_slice(DiracContext *s, DiracSlice *slice, uint8_t *tmp_buf)
-{
-    int i, level, orientation, quant_idx;
-    int qfactor[MAX_DWT_LEVELS][4], qoffset[MAX_DWT_LEVELS][4];
-    GetBitContext *gb = &slice->gb;
-    SliceCoeffs coeffs_num[MAX_DWT_LEVELS];
-
-    DWTContext d;
-    Plane *p;
-    uint16_t scratch[32 * 64];
-    uint8_t dump[32*64];
-    int w, h, idx;
-
-
-    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
-
-    skip_bits_long(gb, 8*s->prefix_bytes);
-    quant_idx = get_bits(gb, 8);
-
-    if (quant_idx > DIRAC_MAX_QUANT_INDEX) {
-        av_log(s->avctx, AV_LOG_ERROR, "Invalid quantization index - %i\n", quant_idx);
-        return AVERROR_INVALIDDATA;
-    }
-
-    /* Slice quantization (slice_quantizers() in the specs) */
-    for (level = 0; level < s->wavelet_depth; level++) {
-        for (orientation = !!level; orientation < 4; orientation++) {
-            const int quant = FFMAX(quant_idx - s->quant[level][orientation], 0);
-            qfactor[level][orientation] = ff_dirac_qscale_tab[quant];
-            qoffset[level][orientation] = ff_dirac_qoffset_intra_tab[quant] + 2;
-        }
-    }
-
-    /* Luma + 2 Chroma planes */
-    for (i = 0; i < 3; i++) {
-        int coef_num, coef_par, off = 0;
-        int64_t length = s->size_scaler*get_bits(gb, 8);
-        int64_t bits_end = get_bits_count(gb) + 8*length;
-        const uint8_t *addr = align_get_bits(gb);
-
-        if (length*8 > get_bits_left(gb)) {
-            av_log(s->avctx, AV_LOG_ERROR, "end too far away\n");
-            return AVERROR_INVALIDDATA;
-        }
-
-        coef_num = subband_coeffs(s, slice->slice_x, slice->slice_y, i, coeffs_num);
-
-        if (s->pshift)
-            coef_par = ff_dirac_golomb_read_32bit(s->reader_ctx, addr,
-                                                  length, tmp_buf, coef_num);
-        else
-            coef_par = ff_dirac_golomb_read_16bit(s->reader_ctx, addr,
-                                                  length, tmp_buf, coef_num);
-
-        if (coef_num > coef_par) {
-            const int start_b = coef_par * (1 << (s->pshift + 1));
-            const int end_b   = coef_num * (1 << (s->pshift + 1));
-            memset(&tmp_buf[start_b], 0, end_b - start_b);
-        }
-
-        for (level = 0; level < s->wavelet_depth; level++) {
-            const SliceCoeffs *c = &coeffs_num[level];
-
-            if (!i) av_log(s->avctx, AV_LOG_VERBOSE, "  plane: %d, level: %d, SliceCoeffs { left: %d, top: %d, tot_h: %d, tot_v: %d, tot: %d }\n",
-                    i, level, c->left, c->top, c->tot_h, c->tot_v, c->tot);
-
-            for (orientation = !!level; orientation < 4; orientation++) {
-                const SubBand *b1 = &s->plane[i].band[level][orientation];
-                uint8_t *buf = b1->ibuf + c->top * b1->stride + (c->left << (s->pshift + 1));
-                /* Change to c->tot_h <= 4 for AVX2 dequantization */
-                const int qfunc = s->pshift + 2*(c->tot_h <= 2);
-
-                if (!i) av_log(s->avctx, AV_LOG_VERBOSE, "    orient: %d, ibuf: 0x%p, buf: 0x%p, offset: %d, stride: %d\n",
-                        orientation,
-                        b1->ibuf,
-                        buf,
-                        (int)(c->top * b1->stride + (c->left << (s->pshift + 1))),
-                        b1->stride);
-
-                if (!i) s->diracdsp.dequant_subband[qfunc](&tmp_buf[off], scratch, 64,
-                        qfactor[level][orientation],
-                        qoffset[level][orientation],
-                        c->tot_v, c->tot_h);
-
-                off += c->tot << (s->pshift + 1);
-            }
-        }
-
-        skip_bits_long(gb, bits_end - get_bits_count(gb));
-    }
-
-    w = s->avctx->width / s->num_x;
-    h = s->avctx->height / s->num_y;
-    p = &s->plane[0];
-    idx = (s->bit_depth - 8) >> 1;
-
-    ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx+2, s->wavelet_depth, s->bit_depth);
-
-    d.buffer = scratch;
-    d.width = w;
-    d.height = h;
-    d.stride = 64;
-
-    for (int y = 0; y < h; y += 16) {
-        ff_spatial_idwt_slice3(&d, y+16, w, h);
-        s->diracdsp.put_signed_rect_clamped[idx](
-                dump + y*32,
-                32,
-                (uint8_t*)(scratch) + y*64,
-                64, w, 16);
-    }
-
-    {
-    FILE *fh = fopen("dump", "wb");
-    if (!fh)
-        return ENOMEM;
-    fwrite(dump, 1, 32*64, fh);
-    fclose(fh);
-    }
-
-    return 0;
-}
-#endif
 
 static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
@@ -555,9 +326,6 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
     DiracContext *s = avctx->priv_data;
     DiracSlice *slices = ((DiracSlice *)arg) + s->num_x*jobnr;
     uint8_t *thread_buf = &s->thread_buf[s->thread_buf_size*threadnr];
-
-    av_log(avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
-
     for (i = 0; i < s->num_x; i++)
         decode_hq_slice(s, &slices[i], thread_buf);
     return 0;
@@ -576,8 +344,6 @@ static int decode_lowdelay(DiracContext *s)
     DiracSlice *slices;
     SliceCoeffs tmp[MAX_DWT_LEVELS];
     int slice_num = 0;
-
-    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
 
     if (s->slice_params_num_buf != (s->num_x * s->num_y)) {
         s->slice_params_buf = av_realloc_f(s->slice_params_buf, s->num_x * s->num_y, sizeof(DiracSlice));
@@ -668,7 +434,7 @@ static void init_planes(DiracContext *s)
                 b->pshift = s->pshift;
                 b->ibuf   = p->idwt.buf;
                 b->level  = level;
-                b->stride = p->idwt.stride /*<< (s->wavelet_depth - level)*/;
+                b->stride = p->idwt.stride << (s->wavelet_depth - level);
                 b->width  = w;
                 b->height = h;
                 b->orientation = orientation;
@@ -698,7 +464,6 @@ static int dirac_unpack_idwt_params(DiracContext *s)
         av_log(s->avctx, AV_LOG_ERROR, errmsg); \
         return AVERROR_INVALIDDATA; \
     }\
-    av_log(s->avctx, AV_LOG_VERBOSE, #dst ": %d\n", tmp);\
     dst = tmp;
 
     align_get_bits(gb);
@@ -781,12 +546,10 @@ static int dirac_decode_frame_internal(DiracContext *s)
 {
     int ret;
 
-    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
-
     if ((ret = decode_lowdelay(s)) < 0)
         return ret;
 
-    //s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
+    s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
 
     return 0;
 }

@@ -90,7 +90,6 @@ int ff_spatial_idwt_init(DWTContext *d, DWTPlane *p, enum dwt_type type,
 void ff_spatial_idwt_init_x86(DWTContext *d, enum dwt_type type);
 
 void ff_spatial_idwt_slice2(DWTContext *d, int y);
-void ff_spatial_idwt_slice3(DWTContext *d, int y, int width, int height);
 
 // shared stuff for simd optimizations
 #define COMPOSE_53iL0(b0, b1, b2)\
@@ -129,6 +128,5 @@ void ff_spatial_idwt_slice3(DWTContext *d, int y, int width, int height);
 #define COMPOSE_DAUB97iH0(b0, b1, b2)\
     (b1 + ((6497*(b0 + b2) + 2048) >> 12))
 
-int ff_idwt_hack_init(DWTContext *d, enum dwt_type type);
 
 #endif /* AVCODEC_DWT_H */

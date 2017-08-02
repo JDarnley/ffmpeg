@@ -33,20 +33,6 @@
 #define TEMPLATE_12bit
 #include "dirac_dwt_template.c"
 
-int ff_idwt_hack_init(DWTContext * d, enum dwt_type type)
-{
-    d->spatial_compose = spatial_compose_haari_dy_8bit;
-    d->vertical_compose = (void*)vertical_compose_haar_8bit;
-    if (type == DWT_DIRAC_HAAR0)
-        d->horizontal_compose = horizontal_compose_haar0i_8bit;
-    else
-        d->horizontal_compose = horizontal_compose_haar1i_8bit;
-
-    for (int level = d->decomposition_count - 1; level >= 0; level--)
-        d->cs[level].y = 1;
-    return 0;
-}
-
 int ff_spatial_idwt_init(DWTContext *d, DWTPlane *p, enum dwt_type type,
                          int decomposition_count, int bit_depth)
 {
@@ -73,10 +59,8 @@ int ff_spatial_idwt_init(DWTContext *d, DWTPlane *p, enum dwt_type type,
         return AVERROR_INVALIDDATA;
     }
 
-#if 0
     if (ARCH_X86 && bit_depth == 8)
         ff_spatial_idwt_init_x86(d, type);
-#endif
     return 0;
 }
 
@@ -87,20 +71,6 @@ void ff_spatial_idwt_slice2(DWTContext *d, int y)
     for (level = d->decomposition_count-1; level >= 0; level--) {
         int wl = d->width  >> level;
         int hl = d->height >> level;
-        int stride_l = d->stride << level;
-
-        while (d->cs[level].y <= FFMIN((y>>level)+support, hl))
-            d->spatial_compose(d, level, wl, hl, stride_l);
-    }
-}
-
-void ff_spatial_idwt_slice3(DWTContext *d, int y, int width, int height)
-{
-    int level, support = d->support;
-
-    for (level = d->decomposition_count-1; level >= 0; level--) {
-        int wl = width  >> level;
-        int hl = height >> level;
         int stride_l = d->stride << level;
 
         while (d->cs[level].y <= FFMIN((y>>level)+support, hl))
