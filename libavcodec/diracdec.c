@@ -347,7 +347,7 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
         if (i==1) av_log(avctx, AV_LOG_INFO, "Chroma row: %d, height: %d, dec lines: %d, trans lines :%d\n",
                 jobnr, slice_height, p->decoded_row_count, p->transformed_row_count);
 
-        if (p->transformed_row_count + 16 <= p->decoded_row_count ) {
+        if (p->transformed_row_count + 16 < p->decoded_row_count ) {
             uint8_t *frame    = s->current_picture->data[i];
             const int idx     = (s->bit_depth - 8) >> 1;
             const int ostride = p->stride << s->field_coding;
@@ -355,7 +355,7 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
             frame += s->cur_field * p->stride;
 
             for (int y = p->transformed_row_count;
-                    y+16 <= p->decoded_row_count;
+                    y+16 < p->decoded_row_count;
                     y += 16, p->transformed_row_count = y) {
                 ff_spatial_idwt_slice2(&p->idwt_ctx, y+16); /* decode */
                 s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
