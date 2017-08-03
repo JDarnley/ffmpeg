@@ -337,8 +337,8 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
 #if 1
     for (i = 0; i < 3; i++) {
         Plane *p          = &s->plane[i];
-        int slice_height = (jobnr+1) * p->height / s->num_y
-                         - jobnr * p->height / s->num_y;
+        int slice_height = (jobnr+1) * (p->height / s->num_y)
+                         - jobnr * (p->height / s->num_y);
         p->decoded_row_count += slice_height;
 
         if (i==0) av_log(avctx, AV_LOG_INFO, "  Luma row: %d, height: %d, dec lines: %d, trans lines :%d\n",
