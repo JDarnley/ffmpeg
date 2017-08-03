@@ -71,6 +71,7 @@ typedef struct SubBand {
 
 typedef struct Plane {
     DWTPlane idwt;
+    DWTContext idwt_ctx;
 
     int width;
     int height;
@@ -489,6 +490,8 @@ static void init_planes(DiracContext *s)
                     b->ibuf += (b->stride >> 1);
             }
         }
+
+        ff_spatial_idwt_init(&p->idwt_ctx, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
     }
 }
 
@@ -593,6 +596,8 @@ static int dirac_decode_frame_internal(DiracContext *s)
     for (int i = 0; i < 3; i++) {
         s->plane[i].transformed_row_count = 0;
         s->plane[i].decoded_row_count = 0;
+
+        ff_spatial_idwt_init(&s->plane[i].idwt_ctx, &s->plane[i].idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
     }
 
     if ((ret = decode_lowdelay(s)) < 0)
