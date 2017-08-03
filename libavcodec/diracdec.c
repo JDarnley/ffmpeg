@@ -138,6 +138,8 @@ static int alloc_sequence_buffers(DiracContext *s)
 {
     int i, w, h, top_padding;
 
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
+
     /* todo: think more about this / use or set Plane here */
     for (i = 0; i < 3; i++) {
         int max_xblen = MAX_BLOCKSIZE >> (i ? s->chroma_x_shift : 0);
@@ -461,6 +463,8 @@ static void init_planes(DiracContext *s)
 {
     int i, w, h, level, orientation;
 
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
+
     for (i = 0; i < 3; i++) {
         Plane *p = &s->plane[i];
 
@@ -491,6 +495,7 @@ static void init_planes(DiracContext *s)
             }
         }
 
+        av_log(s->avctx, AV_LOG_VERBOSE, "enter ff_spatial_idwt_init\n");
         ff_spatial_idwt_init(&p->idwt_ctx, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
     }
 }
@@ -504,6 +509,8 @@ static int dirac_unpack_idwt_params(DiracContext *s)
     GetBitContext *gb = &s->gb;
     int i, level;
     int tmp;
+
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
 
 #define CHECKEDREAD(dst, cond, errmsg) \
     tmp = get_interleaved_ue_golomb(gb); \
@@ -574,6 +581,9 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 
     ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
 
+    av_log(avctx, AV_LOG_VERBOSE, "plane %d, height %d, dec line: %d, trans lines: %d\n",
+            jobnr, p->height, p->decoded_row_count, p->transformed_row_count);
+
     for (y = p->transformed_row_count; y < p->height; y += 16) {
         ff_spatial_idwt_slice2(&d, y+16); /* decode */
         s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
@@ -593,10 +603,13 @@ static int dirac_decode_frame_internal(DiracContext *s)
 {
     int ret;
 
+    av_log(s->avctx, AV_LOG_VERBOSE, "enter %s\n", __func__);
+
     for (int i = 0; i < 3; i++) {
         s->plane[i].transformed_row_count = 0;
         s->plane[i].decoded_row_count = 0;
 
+        av_log(s->avctx, AV_LOG_VERBOSE, "enter ff_spatial_idwt_init\n");
         ff_spatial_idwt_init(&s->plane[i].idwt_ctx, &s->plane[i].idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
     }
 
