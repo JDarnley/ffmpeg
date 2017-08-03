@@ -568,7 +568,6 @@ static int dirac_unpack_idwt_params(DiracContext *s)
 static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
     int y;
-    DWTContext d;
     DiracContext *s   = avctx->priv_data;
     Plane *p          = &s->plane[jobnr];
     uint8_t *frame    = s->current_picture->data[jobnr];
@@ -577,13 +576,11 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 
     frame += s->cur_field * p->stride;
 
-    ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
-
     av_log(avctx, AV_LOG_VERBOSE, "plane %d, height %d, dec line: %d, trans lines: %d\n",
             jobnr, p->height, p->decoded_row_count, p->transformed_row_count);
 
     for (y = p->transformed_row_count; y < p->height; y += 16) {
-        ff_spatial_idwt_slice2(&d, y+16); /* decode */
+        ff_spatial_idwt_slice2(&p->idwt_ctx, y+16); /* decode */
         s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
                                                  ostride,
                                                  p->idwt.buf + y*p->idwt.stride,
