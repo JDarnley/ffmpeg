@@ -28,8 +28,7 @@
  * rearranges the coefficients into the more traditional subdivision,
  * making it easier to encode and perform another level. */
 static av_always_inline void deinterleave(dwtcoef *linell, ptrdiff_t stride,
-                                          int width, int height, dwtcoef *synthl,
-                                          ptrdiff_t synth_stride)
+                                          int width, int height, dwtcoef *synthl)
 {
     int x, y;
     ptrdiff_t synthw = width << 1;
@@ -42,10 +41,10 @@ static av_always_inline void deinterleave(dwtcoef *linell, ptrdiff_t stride,
         for (x = 0; x < width; x++) {
             linell[x] = synthl[(x << 1)];
             linehl[x] = synthl[(x << 1) + 1];
-            linelh[x] = synthl[(x << 1) + synth_stride];
-            linehh[x] = synthl[(x << 1) + synth_stride + 1];
+            linelh[x] = synthl[(x << 1) + synthw];
+            linehh[x] = synthl[(x << 1) + synthw + 1];
         }
-        synthl += 2*synth_stride;
+        synthl += synthw << 1;
         linell += stride;
         linelh += stride;
         linehl += stride;
@@ -135,7 +134,7 @@ static void vc2_subband_dwt_97(dwtcoef *synth, dwtcoef *data,
     for (x = 0; x < synth_width; x++)
         synthl[x] += (synthl[x - synth_width] + synthl[x + synth_width] + 2) >> 2;
 
-    deinterleave(data, stride, width, height, synth, synth_width);
+    deinterleave(data, stride, width, height, synth);
 }
 
 static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
@@ -143,21 +142,15 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
 {
     int x, y;
     dwtcoef *synthl = synth, *datal = data;
-    //const ptrdiff_t synth_width  = width  << 1;
-    //const ptrdiff_t synth_height = height << 1;
-    const ptrdiff_t padded_synth_w = 2*width + 2*SLICE_PADDING_H;
-    const ptrdiff_t padded_synth_h = 2*height + 2*SLICE_PADDING_V;
-    const ptrdiff_t synth_width  = padded_synth_w;
-    const ptrdiff_t synth_height = padded_synth_h;
+    const ptrdiff_t synth_width  = width  << 1;
+    const ptrdiff_t synth_height = height << 1;
 
     /*
      * Shift in one bit that is used for additional precision and copy
      * the data to the buffer.
      */
-    /* copy all data including padding */
-    datal -= SLICE_PADDING_H + SLICE_PADDING_V * stride;
-    for (y = 0; y < padded_synth_h; y++) {
-        for (x = 0; x < padded_synth_w; x++)
+    for (y = 0; y < synth_height; y++) {
+        for (x = 0; x < synth_width; x++)
             synthl[x] = datal[x] << 1;
         synthl += synth_width;
         datal  += stride;
@@ -167,14 +160,14 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
     synthl = synth;
     for (y = 0; y < synth_height; y++) {
         /* Lifting stage 2. */
-        for (x = 0; x < width + SLICE_PADDING_H - 1; x++)
+        for (x = 0; x < width - 1; x++)
             synthl[2 * x + 1] -= (synthl[2 * x] + synthl[2 * x + 2] + 1) >> 1;
 
         synthl[synth_width - 1] -= (2*synthl[synth_width - 2] + 1) >> 1;
 
         /* Lifting stage 1. */
         synthl[0] += (2*synthl[1] + 2) >> 2;
-        for (x = 1; x < width + SLICE_PADDING_H - 1; x++)
+        for (x = 1; x < width - 1; x++)
             synthl[2 * x] += (synthl[2 * x - 1] + synthl[2 * x + 1] + 2) >> 2;
 
         synthl[synth_width - 2] += (synthl[synth_width - 3] + synthl[synth_width - 1] + 2) >> 2;
@@ -188,7 +181,7 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
         synthl[x] -= (synthl[x - synth_width] + synthl[x + synth_width] + 1) >> 1;
 
     synthl = synth + (synth_width << 1);
-    for (y = 1; y < height + SLICE_PADDING_V - 1; y++) {
+    for (y = 1; y < height - 1; y++) {
         for (x = 0; x < synth_width; x++)
             synthl[x + synth_width] -= (synthl[x] + synthl[x + synth_width * 2] + 1) >> 1;
         synthl += (synth_width << 1);
@@ -204,7 +197,7 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
         synthl[x] += (2*synthl[synth_width + x] + 2) >> 2;
 
     synthl = synth + (synth_width << 1);
-    for (y = 1; y < height + SLICE_PADDING_V - 1; y++) {
+    for (y = 1; y < height - 1; y++) {
         for (x = 0; x < synth_width; x++)
             synthl[x] += (synthl[x + synth_width] + synthl[x - synth_width] + 2) >> 2;
         synthl += (synth_width << 1);
@@ -215,8 +208,7 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
         synthl[x] += (synthl[x - synth_width] + synthl[x + synth_width] + 2) >> 2;
 
 
-    deinterleave(data, stride, width, height,
-            synth + SLICE_PADDING_H + SLICE_PADDING_V * synth_width, synth_width);
+    deinterleave(data, stride, width, height, synth);
 }
 
 static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
@@ -248,7 +240,7 @@ static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
         }
     }
 
-    deinterleave(data, stride, width, height, synth, synth_width);
+    deinterleave(data, stride, width, height, synth);
 }
 
 static void vc2_subband_dwt_haar(dwtcoef *synth, dwtcoef *data,
