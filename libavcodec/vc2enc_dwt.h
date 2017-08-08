@@ -25,9 +25,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SLICE_PADDING_H 2
-#define SLICE_PADDING_V 2
-
 typedef int32_t dwtcoef;
 
 enum VC2TransformType {

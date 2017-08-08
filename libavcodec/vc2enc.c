@@ -108,7 +108,6 @@ typedef struct Plane {
     ptrdiff_t coef_stride;
     int slice_w, slice_h;
     int align_w, align_h;
-    int padded_slice_w, padded_slice_h;
 } Plane;
 
 typedef struct SliceArgs {
@@ -580,11 +579,9 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
     const uint32_t *val_lut = &s->coef_lut_val[quant*COEF_LUT_TAB];
 
     dwtcoef *coeff = p->coef_buf
-                   + sx*p->padded_slice_w
-                   + sy*p->padded_slice_h*p->coef_stride
-                   + b->top*p->coef_stride
-                   + SLICE_PADDING_H /* skip over padding */
-                   + SLICE_PADDING_V * p->coef_stride;
+                   + sx*p->slice_w
+                   + sy*p->slice_h*p->coef_stride
+                   + b->top*p->coef_stride;
 
 //    if (!sx && p == &s->plane[0])
 //        av_log(s->avctx, AV_LOG_VERBOSE, "%s: Slice[%d,%d] first line %d\n",
@@ -993,11 +990,9 @@ static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
                     const int right = b->right;
                     const int bottom = b->bottom;
                     dwtcoef *buf = plane->coef_buf
-                                 + slice->x * plane->padded_slice_w
-                                 + slice->y * plane->padded_slice_h * plane->coef_stride
-                                 + b->top * plane->coef_stride
-                                 + SLICE_PADDING_H /* skip over padding */
-                                 + SLICE_PADDING_V * plane->coef_stride;
+                                 + slice->x * plane->slice_w
+                                 + slice->y * plane->slice_h * plane->coef_stride
+                                 + b->top * plane->coef_stride;
 
                     for (y = top; y < bottom; y++) {
                         for (x = left; x < right; x++) {
@@ -1043,8 +1038,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
 
     int w = p->slice_w, h = p->slice_h;
     int x = slice->x,   y = slice->y;
-    int padded_w = p->padded_slice_w;
-    int padded_h = p->padded_slice_h;
 
 //    if (/*!i_plane &&*/ (!x || !y))
 //        av_log(avctx, AV_LOG_VERBOSE, "transforming plane[%d] slice[%d,%d]\n",
@@ -1054,20 +1047,13 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     ptrdiff_t pixel_stride = ta->istride >> (s->bpp - 1);
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
-    dwtcoef *coeff_data    = p->coef_buf
-                           + x*padded_w
-                           + y*padded_h*coeff_stride /* move to top-left of padded slice */
-                           + SLICE_PADDING_H
-                           + SLICE_PADDING_V * coeff_stride; /* move to top-left of true slice */
-    dwtcoef *transform_buf = t->buffer
-                           + x*padded_w*padded_h
-                           + y*padded_w*padded_h*s->num_x;
+    dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
+    dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
 //    if (!x)
 //        av_log(avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
 //                plane_lines_remaining);
 
-#if 0
     ptrdiff_t offset = x*w + y*h*pixel_stride;
     if (field == 1) {
         pixel_stride <<= 1;
@@ -1097,7 +1083,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
             pix += pixel_stride;
         }
     }
-#endif
 
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         w >>= 1;
@@ -1107,103 +1092,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     }
 
     return 0;
-}
-
-static void copy_pixels(dwtcoef* dst, const void *_src,
-        ptrdiff_t dst_stride, ptrdiff_t src_stride, ptrdiff_t src_offset,
-        int w, int h, int diff_offset, int bpp)
-{
-    int x, y;
-    if (bpp == 1) {
-        const uint8_t *src = (const uint8_t*)_src + src_offset;
-        for (y = 0; y < h; y++) {
-            for (x = 0; x < w; x++) {
-                dst[x] = src[x] - diff_offset;
-            }
-            dst += dst_stride;
-            src += src_stride;
-        }
-    } else {
-        const uint16_t *src = (const uint16_t*)_src + src_offset;
-        src_stride >>= 1; /* change from byte count to value count */
-        for (y = 0; y < h; y++) {
-            for (x = 0; x < w; x++) {
-                dst[x] = src[x] - diff_offset;
-            }
-            dst += dst_stride;
-            src += src_stride;
-        }
-    }
-}
-
-static void copy_slice(VC2EncContext *s, Plane *p,
-        const uint8_t *pixel_data, ptrdiff_t pixel_stride,
-        int x, int y)
-{
-    int w        = p->slice_w;
-    int h        = p->slice_h;
-    int padded_w = p->padded_slice_w;
-    int padded_h = p->padded_slice_h;
-
-    /* coeff stride is in number of values */
-    ptrdiff_t coeff_stride = p->coef_stride;
-    dwtcoef *coeff_data    = p->coef_buf;
-
-    /* top */
-    if (y == 0) {
-        /* top-left */
-        if (x == 0) {
-        }
-
-        /* top-right */
-        if (x == s->num_x-1) {
-        }
-
-        /* top */
-        else {
-        }
-    }
-
-    /* bottom */
-    else if (y == s->num_y-1) {
-        /* bottom-left */
-        if (x == 0) {
-        }
-
-        /* bottom-right */
-        if (x == s->num_x-1) {
-        }
-
-        /* bottom */
-        else {
-        }
-    }
-
-    /* left */
-    else if (x == 0) {
-    }
-
-    /* left */
-    else if (x == s->num_x-1) {
-    }
-
-    /* center */
-    else {
-        /* move to top-left corner of padded slice */
-        coeff_data += x * padded_w + y * coeff_stride * padded_h;
-        /* move to correct row of slice */
-        pixel_data += y * pixel_stride * h
-                    /* go back padding rows */
-                    - SLICE_PADDING_V * pixel_stride;
-        /* pixel offset in number of values to keep data value size "hidden" */
-        ptrdiff_t pixel_offset = x*w /* horizontal offset for slices */
-                               - SLICE_PADDING_H; /* go back padding cols */
-
-        /* copy all pixels for slice and padding */
-        copy_pixels(coeff_data, pixel_data,
-                coeff_stride, pixel_stride, pixel_offset,
-                padded_w, padded_h, s->diff_offset, s->bpp);
-    }
 }
 
 static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
@@ -1222,10 +1110,6 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         s->transform_args[i].istride = frame->linesize[i];
         memset(p->coef_buf + p->height * p->coef_stride, 0,
                 sizeof(dwtcoef) * p->coef_stride * (p->align_h - p->height));
-
-        for (int y = 0; y < s->num_y; y++)
-            for (int x = 0; x < s->num_x; x++)
-                copy_slice(s, p, frame->data[i], frame->linesize[i], x, y);
     }
 #if THREADED_TRANSFORM
     s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
@@ -1494,27 +1378,15 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->dwt_height = h;
         p->slice_w    = slice_w;
         p->slice_h    = slice_h;
-        p->padded_slice_w = slice_w + 2*SLICE_PADDING_H;
-        p->padded_slice_h = slice_h + 2*SLICE_PADDING_V;
 
         w             = FFALIGN(w, slice_w);
         h             = FFALIGN(h, slice_h);
         p->align_w    = w;
         p->align_h    = h;
-
-        if (!i) {
-            s->num_x = w / slice_w;
-            s->num_y = h / slice_h;
-        }
-        w = s->num_x * p->padded_slice_w;
-        h = s->num_y * p->padded_slice_h;
-
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
-
         p->coef_buf = av_mallocz(w*h*sizeof(dwtcoef));
         if (!p->coef_buf)
             goto alloc_fail;
-
         /* DWT init */
         if (ff_vc2enc_init_transforms(&s->transform_args[i].t, w, h, slice_w, slice_h))
             goto alloc_fail;
@@ -1548,6 +1420,9 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     }
 
     /* Slices */
+    s->num_x = s->plane[0].align_w/s->slice_width;
+    s->num_y = s->plane[0].align_h/s->slice_height;
+
     s->slice_args = av_calloc(s->num_x*s->num_y, sizeof(SliceArgs));
     if (!s->slice_args)
         goto alloc_fail;
