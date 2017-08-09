@@ -104,10 +104,10 @@ int main(int argc, char **argv)
         exit(1);
 
     /* put sample parameters */
-    c->bit_rate = 400000;
+    c->bit_rate = 600*1000*1000;
     /* resolution must be a multiple of two */
-    c->width = 352;
-    c->height = 288;
+    c->width = 1280;
+    c->height = 720;
     /* frames per second */
     c->time_base = (AVRational){1, 25};
     c->framerate = (AVRational){25, 1};
