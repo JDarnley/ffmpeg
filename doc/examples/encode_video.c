@@ -154,7 +154,7 @@ int main(int argc, char **argv)
     }
 
     /* encode 1 second of video */
-    for (i = 0; i < 25; i++) {
+    for (i = 0; i < 1; i++) {
         fflush(stdout);
 
         /* make sure the frame data is writable */
