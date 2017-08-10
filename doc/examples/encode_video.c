@@ -164,15 +164,15 @@ int main(int argc, char **argv)
 
         /* prepare a dummy image */
         /* Y */
-        for (y = 0; y < c->height; y++) {
-            for (x = 0; x < c->width; x++) {
+        for (y = 0; y < frame->height; y++) {
+            for (x = 0; x < frame->width; x++) {
                 frame->data[0][y * frame->linesize[0] + x] = x + y + i * 3;
             }
         }
 
         /* Cb and Cr */
-        for (y = 0; y < c->height/2; y++) {
-            for (x = 0; x < c->width/2; x++) {
+        for (y = 0; y < frame->height/2; y++) {
+            for (x = 0; x < frame->width/2; x++) {
                 frame->data[1][y * frame->linesize[1] + x] = 128 + y + i * 2;
                 frame->data[2][y * frame->linesize[2] + x] = 64 + x + i * 5;
             }
