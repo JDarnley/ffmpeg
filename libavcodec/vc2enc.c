@@ -1095,6 +1095,13 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     return 0;
 }
 
+/**
+ * Dirac Specification ->
+ * 9.6 Parse Info Header Syntax. parse_info()
+ * 4 byte start code + byte parse code + 4 byte size + 4 byte previous size
+ */
+#define DATA_UNIT_HEADER_SIZE 13
+
 static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                         const char *aux_data, const int header_size, int field)
 {
@@ -1147,7 +1154,8 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
 #if 0
     /* Encoder version */
     if (aux_data) {
-        encode_parse_info(s, DIRAC_PCODE_AUX, 0, 0);
+        encode_parse_info(s, DIRAC_PCODE_AUX,
+                DATA_UNIT_HEADER_SIZE + strlen(aux_data) + 1, 0);
         avpriv_put_string(&s->pb, aux_data, 1);
     }
 #endif
