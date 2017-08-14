@@ -268,7 +268,8 @@ static av_always_inline void get_vc2_ue_uint(int val, uint8_t *nbits,
 }
 
 /* VC-2 10.4 - parse_info() */
-static void encode_parse_info(VC2EncContext *s, enum DiracParseCodes pcode)
+static void encode_parse_info(VC2EncContext *s, enum DiracParseCodes pcode,
+        uint32_t next, uint32_t prev)
 {
     uint32_t cur_pos, dist;
 
@@ -284,12 +285,12 @@ static void encode_parse_info(VC2EncContext *s, enum DiracParseCodes pcode)
 
     /* Next parse offset */
     dist = cur_pos - s->next_parse_offset;
-    AV_WB32(s->pb.buf + s->next_parse_offset + 5, dist);
+    //AV_WB32(s->pb.buf + s->next_parse_offset + 5, dist);
     s->next_parse_offset = cur_pos;
-    put_bits32(&s->pb, pcode == DIRAC_PCODE_END_SEQ ? 13 : 0);
+    put_bits32(&s->pb, next);
 
     /* Last parse offset */
-    put_bits32(&s->pb, s->last_parse_code == DIRAC_PCODE_END_SEQ ? 13 : dist);
+    put_bits32(&s->pb, prev);
 
     s->last_parse_code = pcode;
 }
@@ -1140,24 +1141,26 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
 
     /* Sequence header */
-    encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER);
+    encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, 0);
     encode_seq_header(s);
 
+#if 0
     /* Encoder version */
     if (aux_data) {
-        encode_parse_info(s, DIRAC_PCODE_AUX);
+        encode_parse_info(s, DIRAC_PCODE_AUX, 0, 0);
         avpriv_put_string(&s->pb, aux_data, 1);
     }
+#endif
 
     /* Picture header */
-    encode_parse_info(s, DIRAC_PCODE_PICTURE_HQ);
+    encode_parse_info(s, DIRAC_PCODE_PICTURE_HQ, 0, 0);
     encode_picture_start(s);
 
     /* Encode slices */
     encode_slices(s);
 
     /* End sequence */
-    encode_parse_info(s, DIRAC_PCODE_END_SEQ);
+    encode_parse_info(s, DIRAC_PCODE_END_SEQ, 0, 0);
 
     return 0;
 }
