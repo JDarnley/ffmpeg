@@ -112,6 +112,7 @@ typedef struct Plane {
 
 typedef struct SliceArgs {
     PutBitContext pb;
+    PutBitContext *pb2;
     int cache[DIRAC_MAX_QUANT_INDEX];
     void *ctx;
     int x;
@@ -788,7 +789,12 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
     const int quant_idx = slice_dat->quant_idx;
     const int slice_bytes_max = slice_dat->bytes;
     uint8_t quants[MAX_DWT_LEVELS][4];
-    int i, level, orientation;
+    int i, level, orientation, bits_start_of_slice;
+
+    if (slice_dat->pb2)
+        pb = slice_dat->pb2;
+
+    bits_start_of_slice = put_bits_count(pb);
 
     /* The reference decoder ignores it, and its typical length is 0 */
     memset(put_bits_ptr(pb), 0, s->prefix_bytes);
@@ -816,8 +822,8 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
         }
         avpriv_align_put_bits(pb);
         bytes_len = (put_bits_count(pb) >> 3) - bytes_start - 1;
-        if (i == 2) {
-            int len_diff = slice_bytes_max - (put_bits_count(pb) >> 3);
+        if (p == 2) {
+            int len_diff = slice_bytes_max - (put_bits_count(pb) - bits_start_of_slice >> 3);
             pad_s = FFALIGN((bytes_len + len_diff), s->size_scaler)/s->size_scaler;
             pad_c = (pad_s*s->size_scaler) - bytes_len;
         } else {
