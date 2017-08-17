@@ -1093,6 +1093,8 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
 
     else {
+        uint8_t *fragment_data_pointer;
+        int bits_before, bits_after;
         /* Sequence header */
         encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER);
         encode_seq_header(s);
@@ -1103,10 +1105,17 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
             avpriv_put_string(&s->pb, aux_data, 1);
         }
 
+        /* (14. Fragment Syntax) */
         encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HIGH_QUALITY);
+        flush_put_bits(&s->pb);
+        fragment_data_pointer = put_bits_ptr(&s->pb) + 4;
         encode_fragment_header(s, 0, 0, 0);
         avpriv_align_put_bits(&s->pb);
+
+        bits_before = put_bits_count(&s->pb);
         encode_transform_params(s);
+        bits_after = put_bits_count(&s->pb);
+        AV_WB16(fragment_data_pointer, bits_after - bits_before + 7 >> 3);
 
         for (int y = 0; y < s->num_y; y++) {
             for (int x = 0; x < s->num_x; x++) {
@@ -1120,7 +1129,9 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                     avpriv_align_put_bits(&s->pb);
                 }
 
+                bits_before = put_bits_count(&s->pb);
                 encode_hq_slice(s->avctx, arg);
+                bits_after = put_bits_count(&s->pb);
             }
         }
 
