@@ -191,6 +191,8 @@ typedef struct VC2EncContext {
     enum DiracParseCodes last_parse_code;
 
     int const_quant;
+
+    int fragment_size;
 } VC2EncContext;
 
 static av_always_inline void put_vc2_ue_uint(PutBitContext *pb, uint32_t val)
@@ -570,6 +572,18 @@ static void encode_picture_start(VC2EncContext *s)
     encode_picture_header(s);
     avpriv_align_put_bits(&s->pb);
     encode_wavelet_transform(s);
+}
+
+static void encode_fragment_header(VC2EncContext *s, int slice_count, int x_offset, int y_offset)
+{
+    avpriv_align_put_bits(&s->pb);
+    put_bits32(&s->pb, s->picture_number);
+    put_bits(&s->pb, 16, 0);
+    put_bits(&s->pb, 16, slice_count);
+    if (slice_count) {
+        put_bits(&s->pb, 16, x_offset);
+        put_bits(&s->pb, 16, y_offset);
+    }
 }
 
 #define QUANT(c, qf) (((c) << 2)/(qf))
@@ -1148,6 +1162,12 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         max_frame_bytes += calc_slice_sizes(s);
     }
 
+    if (s->fragment_size) {
+        max_frame_bytes += header_size /* 1 fragment with the transform parameters */
+                         + (s->num_x / s->fragment_size) * s->num_y * (13+12); /* "BBCD" header and fragment header */
+    }
+
+
     if (field < 2) {
         ret = ff_alloc_packet2(s->avctx, avpkt,
                                max_frame_bytes << s->interlaced,
@@ -1159,6 +1179,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         init_put_bits(&s->pb, avpkt->data, avpkt->size);
     }
 
+    if (!s->fragment_size) {
     /* Sequence header */
     encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, 0);
     encode_seq_header(s);
@@ -1181,6 +1202,43 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
 
     /* End sequence */
     encode_parse_info(s, DIRAC_PCODE_END_SEQ, 0, 0);
+    }
+
+    else {
+        /* Sequence header */
+        encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, 0);
+        encode_seq_header(s);
+
+        /* Encoder version */
+        if (aux_data) {
+            encode_parse_info(s, DIRAC_PCODE_AUX, DATA_UNIT_HEADER_SIZE + strlen(aux_data) + 1, 0);
+            avpriv_put_string(&s->pb, aux_data, 1);
+        }
+
+        encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, 0);
+        encode_fragment_header(s, 0, 0, 0);
+        avpriv_align_put_bits(&s->pb);
+        encode_transform_params(s);
+
+        for (int y = 0; y < s->num_y; y++) {
+            for (int x = 0; x < s->num_x; x++) {
+                SliceArgs *arg = &s->slice_args[y*s->num_x + x];
+                arg->pb2 = &s->pb;
+
+                if (!(x % s->fragment_size)) {
+                    avpriv_align_put_bits(&s->pb);
+                    encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, 0);
+                    encode_fragment_header(s, s->fragment_size, x, y);
+                    avpriv_align_put_bits(&s->pb);
+                }
+
+                encode_hq_slice(s->avctx, arg);
+            }
+        }
+
+        /* End sequence */
+        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 0, 0);
+    }
 
     return 0;
 }
@@ -1268,7 +1326,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     /* Total allowed quantization range */
     s->q_ceil    = DIRAC_MAX_QUANT_INDEX;
 
-    s->ver.major = 2;
+    s->ver.major = (s->fragment_size) ? 3 : 2;
     s->ver.minor = 0;
     s->profile   = 3;
     s->level     = 3;
@@ -1446,6 +1504,14 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     s->num_x = s->plane[0].align_w/s->slice_width;
     s->num_y = s->plane[0].align_h/s->slice_height;
 
+    if (s->fragment_size) {
+        if (s->num_x % s->fragment_size) {
+            av_log(avctx, AV_LOG_ERROR, "Fragment size (%d) is not a divisor of the number of slices across the frame (%d)\n",
+                    s->fragment_size, s->num_x);
+            return AVERROR(EINVAL);
+        }
+    }
+
     s->slice_args = av_calloc(s->num_x*s->num_y, sizeof(SliceArgs));
     if (!s->slice_args)
         goto alloc_fail;
@@ -1509,6 +1575,7 @@ static const AVOption vc2enc_options[] = {
         {"default",   "Default from the specifications", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_DEF}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"color",     "Prevents low bitrate discoloration", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_COL}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"flat",      "Optimize for PSNR", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_FLAT}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
+    {"fragment_size", "Number of slices to put in each fragment", offsetof(VC2EncContext, fragment_size), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, VC2ENC_FLAGS, "fragment_size"},
     {NULL}
 };
 
