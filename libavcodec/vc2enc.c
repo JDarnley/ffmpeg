@@ -1201,7 +1201,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         encode_slices(s);
 
         /* End sequence */
-        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 0, 0);
+        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, 0);
     }
 
     else {
@@ -1248,7 +1248,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         }
 
         /* End sequence */
-        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 0, 0);
+        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, 0);
     }
 
     return 0;
