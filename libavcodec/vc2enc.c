@@ -1180,28 +1180,28 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
 
     if (!s->fragment_size) {
-    /* Sequence header */
-    encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, 0);
-    encode_seq_header(s);
+        /* Sequence header */
+        encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, 0);
+        encode_seq_header(s);
 
 #if 0
-    /* Encoder version */
-    if (aux_data) {
-        encode_parse_info(s, DIRAC_PCODE_AUX,
-                DATA_UNIT_HEADER_SIZE + strlen(aux_data) + 1, 0);
-        avpriv_put_string(&s->pb, aux_data, 1);
-    }
+        /* Encoder version */
+        if (aux_data) {
+            encode_parse_info(s, DIRAC_PCODE_AUX,
+                    DATA_UNIT_HEADER_SIZE + strlen(aux_data) + 1, 0);
+            avpriv_put_string(&s->pb, aux_data, 1);
+        }
 #endif
 
-    /* Picture header */
-    encode_parse_info(s, DIRAC_PCODE_PICTURE_HQ, 0, 0);
-    encode_picture_start(s);
+        /* Picture header */
+        encode_parse_info(s, DIRAC_PCODE_PICTURE_HQ, 0, 0);
+        encode_picture_start(s);
 
-    /* Encode slices */
-    encode_slices(s);
+        /* Encode slices */
+        encode_slices(s);
 
-    /* End sequence */
-    encode_parse_info(s, DIRAC_PCODE_END_SEQ, 0, 0);
+        /* End sequence */
+        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 0, 0);
     }
 
     else {
