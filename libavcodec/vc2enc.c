@@ -605,10 +605,6 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
                    + sy*p->slice_h*p->coef_stride
                    + b->top*p->coef_stride;
 
-//    if (!sx && p == &s->plane[0])
-//        av_log(s->avctx, AV_LOG_VERBOSE, "%s: Slice[%d,%d] first line %d\n",
-//                __func__, sx, sy, sy * p->slice_h + b->top);
-
     for (y = b->top; y < b->bottom; y++) {
         for (x = b->left; x < b->right; x++) {
             const int neg = coeff[x] < 0;
@@ -1066,20 +1062,12 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     int w = p->slice_w, h = p->slice_h;
     int x = slice->x,   y = slice->y;
 
-//    if (/*!i_plane &&*/ (!x || !y))
-//        av_log(avctx, AV_LOG_VERBOSE, "transforming plane[%d] slice[%d,%d]\n",
-//                i_plane, x, y);
-
     /* pixel frame stride is in bytes but sample size is needed */
     ptrdiff_t pixel_stride = ta->istride >> (s->bpp - 1);
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
     dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
     dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
-
-//    if (!x)
-//        av_log(avctx, AV_LOG_VERBOSE, "plane lines remaining: %d\n",
-//                plane_lines_remaining);
 
     ptrdiff_t offset = x*w + y*h*pixel_stride;
     if (field == 1) {
@@ -1502,11 +1490,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                 b->top    = (o>1) * slice_h;
                 b->right  = b->left + slice_w;
                 b->bottom = b->top  + slice_h;
-
-                av_log(avctx, AV_LOG_VERBOSE, "Plane[%d] SubBand[%d][%d] (old) { shift: %d, width: %d, height: %d }\n",
-                        i, level, o, shift, w, h);
-                av_log(avctx, AV_LOG_VERBOSE, "Plane[%d] SubBand[%d][%d] (new) { top: %d, bottom: %d }\n",
-                        i, level, o, b->top, b->bottom);
             }
         }
     }
