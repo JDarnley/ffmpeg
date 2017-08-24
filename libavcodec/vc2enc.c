@@ -126,8 +126,6 @@ typedef struct SliceArgs {
 typedef struct TransformArgs {
     void *ctx;
     Plane *plane;
-    void *idata;
-    ptrdiff_t istride;
     int field;
     VC2TransformContext t;
     const AVFrame *frame;
@@ -625,172 +623,6 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
     }
 }
 
-static int count_hq_slice(SliceArgs *slice, int quant_idx)
-{
-    int i, x, y, level, orientation;
-    uint8_t quants[MAX_DWT_LEVELS][4];
-    int bits = 0;
-    VC2EncContext *s = slice->ctx;
-
-    if (slice->cache[quant_idx])
-        return slice->cache[quant_idx];
-
-    bits += 8*s->prefix_bytes;
-    bits += 8; /* quant_idx */
-
-    for (level = 0; level < s->wavelet_depth; level++)
-        for (orientation = !!level; orientation < 4; orientation++)
-            quants[level][orientation] = FFMAX(quant_idx - s->quant[level][orientation], 0);
-
-    for (i = 0; i < 3; i++) {
-        int bytes_start, bytes_len, pad_s, pad_c;
-        Plane *p = &s->plane[i];
-
-        bytes_start = bits >> 3;
-        bits += 8;
-        for (level = 0; level < s->wavelet_depth; level++) {
-            for (orientation = !!level; orientation < 4; orientation++) {
-                SubBand *b = &p->band[level][orientation];
-
-                const int q_idx = quants[level][orientation];
-                const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
-                const int qfactor = ff_dirac_qscale_tab[q_idx];
-
-                dwtcoef *buf = p->coef_buf
-                             + slice->x*p->slice_w
-                             + slice->y*p->slice_h*p->coef_stride
-                             + b->top*p->coef_stride;
-
-                for (y = b->top; y < b->bottom; y++) {
-                    for (x = b->left; x < b->right; x++) {
-                        uint32_t c_abs = FFABS(buf[x]);
-                        if (c_abs < COEF_LUT_TAB) {
-                            bits += len_lut[c_abs];
-                        } else {
-                            c_abs = QUANT(c_abs, qfactor);
-                            bits += count_vc2_ue_uint(c_abs);
-                            bits += !!c_abs;
-                        }
-                    }
-                    buf += p->coef_stride;
-                }
-            }
-        }
-        bits += FFALIGN(bits, 8) - bits;
-        bytes_len = (bits >> 3) - bytes_start - 1;
-        pad_s = FFALIGN(bytes_len, s->size_scaler)/s->size_scaler;
-        pad_c = (pad_s*s->size_scaler) - bytes_len;
-        bits += pad_c*8;
-    }
-
-    slice->cache[quant_idx] = bits;
-
-    return bits;
-}
-
-/* Approaches the best possible quantizer asymptotically, its kinda exaustive
- * but we have a LUT to get the coefficient size in bits. Guaranteed to never
- * overshoot, which is apparently very important when streaming */
-static int rate_control(AVCodecContext *avctx, void *arg)
-{
-    SliceArgs *slice_dat = arg;
-    VC2EncContext *s = slice_dat->ctx;
-    const int top = slice_dat->bits_ceil;
-    const int bottom = slice_dat->bits_floor;
-    int quant_buf[2] = {-1, -1};
-    int quant = slice_dat->quant_idx, step = 1;
-    int bits_last, bits = count_hq_slice(slice_dat, quant);
-    while ((bits > top) || (bits < bottom)) {
-        const int signed_step = bits > top ? +step : -step;
-        quant  = av_clip(quant + signed_step, 0, s->q_ceil-1);
-        bits   = count_hq_slice(slice_dat, quant);
-        if (quant_buf[1] == quant) {
-            quant = FFMAX(quant_buf[0], quant);
-            bits  = quant == quant_buf[0] ? bits_last : bits;
-            break;
-        }
-        step         = av_clip(step/2, 1, (s->q_ceil-1)/2);
-        quant_buf[1] = quant_buf[0];
-        quant_buf[0] = quant;
-        bits_last    = bits;
-    }
-    slice_dat->quant_idx = av_clip(quant, 0, s->q_ceil-1);
-    slice_dat->bytes = SSIZE_ROUND(bits >> 3);
-    return 0;
-}
-
-static int calc_slice_sizes(VC2EncContext *s)
-{
-    int i, j, slice_x, slice_y, bytes_left = 0;
-    int bytes_top[SLICE_REDIST_TOTAL] = {0};
-    int64_t total_bytes_needed = 0;
-    int slice_redist_range = FFMIN(SLICE_REDIST_TOTAL, s->num_x*s->num_y);
-    SliceArgs *enc_args = s->slice_args;
-    SliceArgs *top_loc[SLICE_REDIST_TOTAL] = {NULL};
-
-    init_quant_matrix(s);
-
-    for (slice_y = 0; slice_y < s->num_y; slice_y++) {
-        for (slice_x = 0; slice_x < s->num_x; slice_x++) {
-            SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
-            args->bits_ceil  = s->slice_max_bytes << 3;
-            args->bits_floor = s->slice_min_bytes << 3;
-            memset(args->cache, 0, s->q_ceil*sizeof(*args->cache));
-        }
-    }
-
-    /* First pass - determine baseline slice sizes w.r.t. max_slice_size */
-    s->avctx->execute(s->avctx, rate_control, enc_args, NULL, s->num_x*s->num_y,
-                      sizeof(SliceArgs));
-
-    for (i = 0; i < s->num_x*s->num_y; i++) {
-        SliceArgs *args = &enc_args[i];
-        bytes_left += s->slice_max_bytes - args->bytes;
-        for (j = 0; j < slice_redist_range; j++) {
-            if (args->bytes > bytes_top[j]) {
-                bytes_top[j] = args->bytes;
-                top_loc[j]   = args;
-                break;
-            }
-        }
-    }
-
-    /* Second pass - distribute leftover bytes */
-    while (1) {
-        int distributed = 0;
-        for (i = 0; i < slice_redist_range; i++) {
-            SliceArgs *args;
-            int bits, bytes, diff, prev_bytes, new_idx;
-            if (bytes_left <= 0)
-                break;
-            if (!top_loc[i] || !top_loc[i]->quant_idx)
-                break;
-            args = top_loc[i];
-            prev_bytes = args->bytes;
-            new_idx = FFMAX(args->quant_idx - 1, 0);
-            bits  = count_hq_slice(args, new_idx);
-            bytes = SSIZE_ROUND(bits >> 3);
-            diff  = bytes - prev_bytes;
-            if ((bytes_left - diff) > 0) {
-                args->quant_idx = new_idx;
-                args->bytes = bytes;
-                bytes_left -= diff;
-                distributed++;
-            }
-        }
-        if (!distributed)
-            break;
-    }
-
-    for (i = 0; i < s->num_x*s->num_y; i++) {
-        SliceArgs *args = &enc_args[i];
-        total_bytes_needed += args->bytes;
-        s->q_avg = (s->q_avg + args->quant_idx)/2;
-    }
-
-    return total_bytes_needed;
-}
-
 /* VC-2 13.5.3 - hq_slice */
 static int encode_hq_slice(AVCodecContext *avctx, void *arg)
 {
@@ -800,14 +632,11 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
     const int slice_x = slice_dat->x;
     const int slice_y = slice_dat->y;
     const int quant_idx = slice_dat->quant_idx;
-    const int slice_bytes_max = slice_dat->bytes;
     uint8_t quants[MAX_DWT_LEVELS][4];
-    int i, level, orientation, bits_start_of_slice;
+    int i, level, orientation;
 
     if (slice_dat->pb2)
         pb = slice_dat->pb2;
-
-    bits_start_of_slice = put_bits_count(pb);
 
     /* The reference decoder ignores it, and its typical length is 0 */
     memset(put_bits_ptr(pb), 0, s->prefix_bytes);
@@ -847,38 +676,6 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
     return 0;
 }
 
-/* VC-2 13.5.1 - low_delay_transform_data() */
-static int encode_slices(VC2EncContext *s)
-{
-    uint8_t *buf;
-    int slice_x, slice_y, skip = 0;
-    SliceArgs *enc_args = s->slice_args;
-
-    avpriv_align_put_bits(&s->pb);
-    flush_put_bits(&s->pb);
-    buf = put_bits_ptr(&s->pb);
-
-    for (slice_y = 0; slice_y < s->num_y; slice_y++) {
-        for (slice_x = 0; slice_x < s->num_x; slice_x++) {
-            SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
-            init_put_bits(&args->pb, buf + skip, args->bytes+s->prefix_bytes);
-            skip += args->bytes;
-        }
-    }
-
-#if 0
-    s->avctx->execute(s->avctx, encode_hq_slice, enc_args, NULL, s->num_x*s->num_y,
-                      sizeof(SliceArgs));
-#else
-    for (int i = 0; i < s->num_x*s->num_y; i++)
-        encode_hq_slice(s->avctx, enc_args + i);
-#endif
-
-    skip_put_bytes(&s->pb, skip);
-
-    return 0;
-}
-
 /*
  * Transform basics for a 3 level transform
  * |---------------------------------------------------------------------|
@@ -914,134 +711,6 @@ static int encode_slices(VC2EncContext *s)
  * of levels. The rest of the areas can be thought as the details needed
  * to restore the image perfectly to its original size.
  */
-static int dwt_plane(AVCodecContext *avctx, void *arg)
-{
-    TransformArgs *transform_dat = arg;
-    VC2EncContext *s = transform_dat->ctx;
-    const void *frame_data = transform_dat->idata;
-    const ptrdiff_t linesize = transform_dat->istride;
-    const int field = transform_dat->field;
-    const Plane *p = transform_dat->plane;
-    VC2TransformContext *t = &transform_dat->t;
-    dwtcoef *buf = p->coef_buf;
-    const int idx = s->wavelet_idx;
-    const int skip = 1 + s->interlaced;
-
-    int x, y, level, offset;
-    ptrdiff_t pix_stride = linesize >> (s->bpp - 1);
-
-    if (field == 1) {
-        offset = 0;
-        pix_stride <<= 1;
-    } else if (field == 2) {
-        offset = pix_stride;
-        pix_stride <<= 1;
-    } else {
-        offset = 0;
-    }
-
-    if (s->bpp == 1) {
-        const uint8_t *pix = (const uint8_t *)frame_data + offset;
-        for (y = 0; y < p->height*skip; y+=skip) {
-            for (x = 0; x < p->width; x++) {
-                buf[x] = pix[x] - s->diff_offset;
-            }
-            buf += p->coef_stride;
-            pix += pix_stride;
-        }
-    } else {
-        const uint16_t *pix = (const uint16_t *)frame_data + offset;
-        for (y = 0; y < p->height*skip; y+=skip) {
-            for (x = 0; x < p->width; x++) {
-                buf[x] = pix[x] - s->diff_offset;
-            }
-            buf += p->coef_stride;
-            pix += pix_stride;
-        }
-    }
-
-//    av_log(avctx, AV_LOG_VERBOSE, "memset %d rows\n", p->dwt_height - p->height);
-    memset(buf, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
-
-    for (level = s->wavelet_depth-1; level >= 0; level--) {
-        const SubBand *b = &p->band[level][0];
-        av_log(avctx, AV_LOG_VERBOSE, "transform stride: %d, width: %d, height: %d\n",
-                (int)p->coef_stride, b->width, b->height);
-        t->vc2_subband_dwt[idx](t->buffer, p->coef_buf, p->coef_stride,
-                                b->width, b->height);
-    }
-
-    return 0;
-}
-
-static int constant_quantiser_slice_sizes(VC2EncContext *s, int quant_idx)
-{
-    int bytes = 0;
-
-    for (int i = 0; i < s->num_x * s->num_y; i++)
-    {
-        SliceArgs *slice = &s->slice_args[i];
-        int x, y;
-        uint8_t quants[MAX_DWT_LEVELS][4];
-        int bits = 0, p, level, orientation;
-
-        bits += 8*s->prefix_bytes;
-        bits += 8; /* quant_idx */
-
-        for (level = 0; level < s->wavelet_depth; level++)
-            for (orientation = !!level; orientation < 4; orientation++)
-                quants[level][orientation] = FFMAX(quant_idx - s->quant[level][orientation], 0);
-
-        for (p = 0; p < 3; p++) {
-            Plane *plane = &s->plane[p];
-            int bytes_start, bytes_len, pad_s, pad_c;
-            bytes_start = bits >> 3;
-            bits += 8;
-            for (level = 0; level < s->wavelet_depth; level++) {
-                for (orientation = !!level; orientation < 4; orientation++) {
-                    SubBand *b = &plane->band[level][orientation];
-
-                    const int q_idx = quants[level][orientation];
-                    const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
-                    const int qfactor = ff_dirac_qscale_tab[q_idx];
-
-                    const int left = b->left;
-                    const int top  = b->top;
-                    const int right = b->right;
-                    const int bottom = b->bottom;
-                    dwtcoef *buf = plane->coef_buf
-                                 + slice->x * plane->slice_w
-                                 + slice->y * plane->slice_h * plane->coef_stride
-                                 + b->top * plane->coef_stride;
-
-                    for (y = top; y < bottom; y++) {
-                        for (x = left; x < right; x++) {
-                            uint32_t c_abs = FFABS(buf[x]);
-                            if (c_abs < COEF_LUT_TAB) {
-                                bits += len_lut[c_abs];
-                            } else {
-                                c_abs = QUANT(c_abs, qfactor);
-                                bits += count_vc2_ue_uint(c_abs);
-                                bits += !!c_abs;
-                            }
-                        }
-                        buf += b->stride;
-                    }
-                }
-            }
-            bits += FFALIGN(bits, 8) - bits;
-            bytes_len = (bits >> 3) - bytes_start - 1;
-            pad_s = FFALIGN(bytes_len, s->size_scaler)/s->size_scaler;
-            pad_c = (pad_s*s->size_scaler) - bytes_len;
-            bits += pad_c*8;
-        }
-
-        slice->bytes = SSIZE_ROUND(bits >> 3);
-        bytes += SSIZE_ROUND(bits >> 3);
-    }
-
-    return bytes;
-}
 
 static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
