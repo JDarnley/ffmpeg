@@ -456,13 +456,6 @@ static void encode_seq_header(VC2EncContext *s)
     put_vc2_ue_uint(&s->pb, s->interlaced); /* Frames or fields coding */
 }
 
-/* VC-2 12.1 - picture_header() */
-static void encode_picture_header(VC2EncContext *s)
-{
-    avpriv_align_put_bits(&s->pb);
-    put_bits32(&s->pb, s->picture_number++);
-}
-
 /* VC-2 12.3.4.1 - slice_parameters() */
 static void encode_slice_params(VC2EncContext *s)
 {
@@ -559,22 +552,6 @@ static void encode_transform_params(VC2EncContext *s)
 
     encode_slice_params(s);
     encode_quant_matrix(s);
-}
-
-/* VC-2 12.2 - wavelet_transform() */
-static void encode_wavelet_transform(VC2EncContext *s)
-{
-    encode_transform_params(s);
-    avpriv_align_put_bits(&s->pb);
-}
-
-/* VC-2 12 - picture_parse() */
-static void encode_picture_start(VC2EncContext *s)
-{
-    avpriv_align_put_bits(&s->pb);
-    encode_picture_header(s);
-    avpriv_align_put_bits(&s->pb);
-    encode_wavelet_transform(s);
 }
 
 static void encode_fragment_header(VC2EncContext *s, int slice_count, int x_offset, int y_offset)
@@ -792,6 +769,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     int64_t max_frame_bytes = s->avctx->width * s->avctx->height
                             * 3 /*three samples per pixel */
                             * 4 /*four bytes per coefficient (maybe) */;
+    int y = frame->pos_y / s->slice_height;
 
     /* Threaded DWT transform */
     for (i = 0; i < 3; i++) {
@@ -820,10 +798,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         init_put_bits(&s->pb, avpkt->data, avpkt->size);
     }
 
-    int bits_before, bits_after;
-
     if (frame->pos_y == 0) {
-        uint8_t *fragment_data_pointer;
         /* Sequence header */
         encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, s->prev_offset);
         encode_seq_header(s);
@@ -843,7 +818,6 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
 
     /* Encode slices */
-    int y = frame->pos_y / s->slice_height;
     for (int x = 0; x < s->num_x; x++) {
         SliceArgs *arg = &s->slice_args[x];
         arg->pb2 = &s->pb;
