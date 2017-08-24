@@ -1196,6 +1196,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         }
     }
 
+    init_quant_matrix(s);
+
     return 0;
 
 alloc_fail:
