@@ -186,8 +186,8 @@ typedef struct VC2EncContext {
     enum VC2_QM quant_matrix;
 
     /* Parse code state */
-    uint32_t next_parse_offset;
-    enum DiracParseCodes last_parse_code;
+    int prev_parse_info_position;
+    uint32_t prev_offset;
 
     int const_quant;
 
@@ -275,28 +275,30 @@ static av_always_inline void get_vc2_ue_uint(int val, uint8_t *nbits,
 static void encode_parse_info(VC2EncContext *s, enum DiracParseCodes pcode,
         uint32_t next, uint32_t prev)
 {
-    uint32_t cur_pos, dist;
-
     avpriv_align_put_bits(&s->pb);
-
-    cur_pos = put_bits_count(&s->pb) >> 3;
+    s->prev_parse_info_position = put_bits_count(&s->pb) >> 3;
+    s->prev_offset = next;
 
     /* Magic string */
     avpriv_put_string(&s->pb, "BBCD", 0);
-
     /* Parse code */
     put_bits(&s->pb, 8, pcode);
-
     /* Next parse offset */
-    dist = cur_pos - s->next_parse_offset;
-    //AV_WB32(s->pb.buf + s->next_parse_offset + 5, dist);
-    s->next_parse_offset = cur_pos;
     put_bits32(&s->pb, next);
-
     /* Last parse offset */
     put_bits32(&s->pb, prev);
+}
 
-    s->last_parse_code = pcode;
+static void write_prev_parse_info_next_offset(VC2EncContext *s, uint32_t value)
+{
+    uint8_t *ptr = s->pb.buf + s->prev_parse_info_position + 5;
+    s->prev_offset = value;
+    AV_WB32(ptr, value);
+}
+
+static uint32_t get_distance_from_prev_parse_info(VC2EncContext *s)
+{
+    return (put_bits_count(&s->pb) + 7 >> 3) - s->prev_parse_info_position;
 }
 
 /* VC-2 11.1 - parse_parameters()
@@ -823,26 +825,21 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     if (frame->pos_y == 0) {
         uint8_t *fragment_data_pointer;
         /* Sequence header */
-        encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, 0);
+        encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, s->prev_offset);
         encode_seq_header(s);
 
         /* Encoder version */
         if (aux_data) {
-            encode_parse_info(s, DIRAC_PCODE_AUX, DATA_UNIT_HEADER_SIZE + strlen(aux_data) + 1, 0);
+            write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
+            encode_parse_info(s, DIRAC_PCODE_AUX, DATA_UNIT_HEADER_SIZE + strlen(aux_data) + 1, s->prev_offset);
             avpriv_put_string(&s->pb, aux_data, 1);
         }
 
         /* (14. Fragment Syntax) */
-        encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, 0);
-        flush_put_bits(&s->pb);
-        fragment_data_pointer = put_bits_ptr(&s->pb) + 4;
+        write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
+        encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
         encode_fragment_header(s, 0, 0, 0);
-        avpriv_align_put_bits(&s->pb);
-
-        bits_before = put_bits_count(&s->pb);
         encode_transform_params(s);
-        bits_after = put_bits_count(&s->pb);
-        AV_WB16(fragment_data_pointer, bits_after - bits_before + 7 >> 3);
     }
 
     /* Encode slices */
@@ -852,28 +849,23 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         arg->pb2 = &s->pb;
 
         if (!(x % s->fragment_size)) {
-            avpriv_align_put_bits(&s->pb);
-            encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, 0);
+            if (s->prev_parse_info_position >= 0)
+                write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
+            encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
             encode_fragment_header(s, s->fragment_size, x, y);
             avpriv_align_put_bits(&s->pb);
         }
 
-        bits_before = put_bits_count(&s->pb);
         encode_hq_slice(s->avctx, arg);
-        //encode_slice(s, i);
-        bits_after = put_bits_count(&s->pb);
     }
 
+
+    write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
 
     /* End sequence */
     if (frame->pos_y == s->avctx->height - s->plane[0].slice_h) {
-        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, 0);
+        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
     }
-
-    avpriv_align_put_bits(&s->pb);
-    uint32_t distance = (put_bits_count(&s->pb) >> 3) - s->next_parse_offset;
-    AV_WB32(s->pb.buf + s->next_parse_offset + 5, distance);
-    s->next_parse_offset = distance;
 
     return 0;
 }
@@ -906,8 +898,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     s->avctx = avctx;
     s->size_scaler = 2;
     s->prefix_bytes = 0;
-    s->last_parse_code = 0;
-    s->next_parse_offset = 0;
+    s->prev_parse_info_position = -1;
 
     /* Rate control */
     max_frame_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
