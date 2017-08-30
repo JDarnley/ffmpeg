@@ -1187,7 +1187,7 @@ static const AVOption vc2enc_options[] = {
         {"default",   "Default from the specifications", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_DEF}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"color",     "Prevents low bitrate discoloration", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_COL}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"flat",      "Optimize for PSNR", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_FLAT}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
-    {"fragment_size", "Number of slices to put in each fragment", offsetof(VC2EncContext, fragment_size), AV_OPT_TYPE_INT, {.i64 = 8}, 1, INT_MAX, VC2ENC_FLAGS, "fragment_size"},
+    {"fragment_size", "Number of slices to put in each fragment", offsetof(VC2EncContext, fragment_size), AV_OPT_TYPE_INT, {.i64 = 1}, 1, INT_MAX, VC2ENC_FLAGS, "fragment_size"},
     {NULL}
 };
 
