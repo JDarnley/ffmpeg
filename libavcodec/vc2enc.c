@@ -126,7 +126,6 @@ typedef struct SliceArgs {
 typedef struct TransformArgs {
     void *ctx;
     Plane *plane;
-    int field;
     VC2TransformContext t;
     const AVFrame *frame;
 } TransformArgs;
@@ -323,7 +322,10 @@ static void encode_frame_size(VC2EncContext *s)
     if (!s->strict_compliance) {
         AVCodecContext *avctx = s->avctx;
         put_vc2_ue_uint(&s->pb, avctx->width);
-        put_vc2_ue_uint(&s->pb, avctx->height);
+        if (s->interlaced)
+            put_vc2_ue_uint(&s->pb, 2*avctx->height);
+        else
+            put_vc2_ue_uint(&s->pb, avctx->height);
     }
 }
 
@@ -874,8 +876,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     const AVFrame *frame   = ta->frame;
     VC2TransformContext *t = &ta->t;
     const int idx          = s->wavelet_idx;
-    const int skip         = 1 + s->interlaced;
-    const int field        = ta->field;
+    const int skip         = 1;
 
     int w = p->slice_w, h = p->slice_h;
     int x = slice->x,   y = slice->y;
@@ -888,12 +889,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
     ptrdiff_t offset = x*w + y*h*pixel_stride;
-    if (field == 1) {
-        pixel_stride <<= 1;
-    } else if (field == 2) {
-        offset += pixel_stride;
-        pixel_stride <<= 1;
-    }
 
     if (s->bpp == 1) {
         dwtcoef *buf = coeff_data;
@@ -947,7 +942,6 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     for (i = 0; i < 3; i++) {
         Plane *p = &s->plane[i];
         s->transform_args[i].ctx   = s;
-        s->transform_args[i].field = field;
         s->transform_args[i].plane = p;
         s->transform_args[i].frame = frame;
     }
@@ -962,16 +956,14 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     max_frame_bytes = header_size + calc_slice_sizes(s)
         + (s->num_x / s->fragment_size) * (13+12); /* "BBCD" header and fragment header */;
 
-    if (field < 2 /*&& frame->pos_x == 0 && frame->pos_y == 0*/) {
-        ret = ff_alloc_packet2(s->avctx, avpkt,
-                               max_frame_bytes,
-                               max_frame_bytes);
-        if (ret) {
-            av_log(s->avctx, AV_LOG_ERROR, "Error getting output packet.\n");
-            return ret;
-        }
-        init_put_bits(&s->pb, avpkt->data, avpkt->size);
+    ret = ff_alloc_packet2(s->avctx, avpkt,
+            max_frame_bytes,
+            max_frame_bytes);
+    if (ret) {
+        av_log(s->avctx, AV_LOG_ERROR, "Error getting output packet.\n");
+        return ret;
     }
+    init_put_bits(&s->pb, avpkt->data, avpkt->size);
 
     if (frame->pos_y == 0) {
         /* Sequence header */
@@ -1070,11 +1062,6 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     ret = encode_frame(s, avpkt, frame, aux_data, header_size, s->interlaced);
     if (ret)
         return ret;
-    if (s->interlaced) {
-        ret = encode_frame(s, avpkt, frame, aux_data, header_size, 2);
-        if (ret)
-            return ret;
-    }
 
     flush_put_bits(&s->pb);
     avpkt->size = put_bits_count(&s->pb) >> 3;
@@ -1137,17 +1124,22 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     s->interlaced = !((avctx->field_order == AV_FIELD_UNKNOWN) ||
                       (avctx->field_order == AV_FIELD_PROGRESSIVE));
 
+    int height = avctx->height;
+    if (s->interlaced)
+        height *= 2;
+
     for (i = 0; i < base_video_fmts_len; i++) {
         const VC2BaseVideoFormat *fmt = &base_video_fmts[i];
         if (avctx->pix_fmt != fmt->pix_fmt)
             continue;
+        /* TODO: what to do about field separated pictures and their 2x rate */
         if (avctx->time_base.num != fmt->time_base.num)
             continue;
         if (avctx->time_base.den != fmt->time_base.den)
             continue;
         if (avctx->width != fmt->width)
             continue;
-        if (avctx->height != fmt->height)
+        if (height != fmt->height)
             continue;
         if (s->interlaced != fmt->interlaced)
             continue;
