@@ -1165,12 +1165,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         s->const_quant = const_quant;
     }
 
-    if ((s->slice_width  & (s->slice_width  - 1)) ||
-        (s->slice_height & (s->slice_height - 1))) {
-        av_log(avctx, AV_LOG_ERROR, "Slice size is not a power of two!\n");
-        return AVERROR(EINVAL);
-    }
-
     if ((s->slice_width > avctx->width) ||
         (s->slice_height > avctx->height)) {
         av_log(avctx, AV_LOG_ERROR, "Slice size is bigger than the image!\n");
@@ -1236,6 +1230,12 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         if (s->interlaced) {
             h >>= 1;
             // slice_h >>= 1; /* TODO: should this be shifted too? */
+        }
+
+        if (slice_w & (alignment-1) || slice_h & (alignment-1)) {
+            av_log(avctx, AV_LOG_ERROR, "slice dimensions not a multiple of the wavelet depth (2**%d, %d)\n",
+                    s->wavelet_depth, alignment);
+            return AVERROR(EINVAL);
         }
 
         p->width      = w;
