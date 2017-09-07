@@ -1036,11 +1036,11 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     }
 
     s->avctx = avctx;
+    s->prev_parse_info_position = -1;
 
     if (!frame->pos_y) {
     s->size_scaler = 2;
     s->prefix_bytes = 0;
-    s->prev_parse_info_position = -1;
 
     /* Rate control */
     max_frame_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
