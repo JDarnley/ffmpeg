@@ -1233,11 +1233,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         int alignment      = 1 << s->wavelet_depth;
         Plane *p           = &s->plane[i];
 
-        if (s->interlaced) {
-            h >>= 1;
-            // slice_h >>= 1; /* TODO: should this be shifted too? */
-        }
-
         if (slice_w & (alignment-1) || slice_h & (alignment-1)) {
             av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) for plane %d not a multiple of the wavelet depth (2**%d, %d)\n",
                     slice_w, slice_h, i, s->wavelet_depth, alignment);
