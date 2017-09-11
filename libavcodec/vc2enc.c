@@ -566,7 +566,8 @@ static void encode_fragment_header(VC2EncContext *s, int slice_count, int x_offs
     if (slice_count) {
         put_bits(&s->pb, 16, x_offset);
         put_bits(&s->pb, 16, y_offset);
-    }
+    } else
+        s->picture_number++;
 }
 
 #define QUANT(c, qf) (((c) << 2)/(qf))
