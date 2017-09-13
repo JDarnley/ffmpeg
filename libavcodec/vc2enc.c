@@ -1041,23 +1041,23 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     s->prev_parse_info_position = -1;
 
     if (!frame->pos_y) {
-    s->size_scaler = 2;
-    s->prefix_bytes = 0;
+        s->size_scaler = 2;
+        s->prefix_bytes = 0;
 
-    /* Rate control */
-    max_frame_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
-                                  s->avctx->time_base.den) >> 3) - header_size;
-    s->slice_max_bytes = av_rescale(max_frame_bytes, 1, s->num_x*s->num_y);
+        /* Rate control */
+        max_frame_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
+                                      s->avctx->time_base.den) >> 3) - header_size;
+        s->slice_max_bytes = av_rescale(max_frame_bytes, 1, s->num_x*s->num_y);
 
-    /* Find an appropriate size scaler */
-    while (sig_size > 255) {
-        int r_size = SSIZE_ROUND(s->slice_max_bytes);
-        sig_size = r_size/s->size_scaler; /* Signalled slize size */
-        s->size_scaler <<= 1;
-    }
+        /* Find an appropriate size scaler */
+        while (sig_size > 255) {
+            int r_size = SSIZE_ROUND(s->slice_max_bytes);
+            sig_size = r_size/s->size_scaler; /* Signalled slize size */
+            s->size_scaler <<= 1;
+        }
 
-    s->slice_max_bytes = SSIZE_ROUND(s->slice_max_bytes);
-    s->slice_min_bytes = s->slice_max_bytes - s->slice_max_bytes*(s->tolerance/100.0f);
+        s->slice_max_bytes = SSIZE_ROUND(s->slice_max_bytes);
+        s->slice_min_bytes = s->slice_max_bytes - s->slice_max_bytes*(s->tolerance/100.0f);
     }
 
     ret = encode_frame(s, avpkt, frame, aux_data, header_size, s->interlaced);
