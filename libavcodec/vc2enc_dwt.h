@@ -49,4 +49,6 @@ typedef struct VC2TransformContext {
 int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_width, int p_height);
 void ff_vc2enc_free_transforms(VC2TransformContext *t);
 
+void ff_vc2enc_init_transforms_x86(VC2TransformContext *s);
+
 #endif /* AVCODEC_VC2ENC_DWT_H */

@@ -262,6 +262,10 @@ av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_width, int p
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR]   = vc2_subband_dwt_haar;
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR_S] = vc2_subband_dwt_haar_shift;
 
+#if ARCH_X86_64
+    ff_vc2enc_init_transforms_x86(s);
+#endif
+
     s->buffer = av_malloc(2*p_width*p_height*sizeof(dwtcoef));
     if (!s->buffer)
         return 1;
