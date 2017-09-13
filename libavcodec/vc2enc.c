@@ -162,6 +162,7 @@ typedef struct VC2EncContext {
 
     int num_x; /* #slices horizontally */
     int num_y; /* #slices vertically */
+    int num_y_partial;
     int prefix_bytes;
     int size_scaler;
     int chroma_x_shift;
@@ -726,27 +727,29 @@ static int rate_control(AVCodecContext *avctx, void *arg)
 
 static int calc_slice_sizes(VC2EncContext *s)
 {
-    int i, j, slice_x, bytes_left = 0;
+    int i, j, slice_x, slice_y, bytes_left = 0;
     int bytes_top[SLICE_REDIST_TOTAL] = {0};
     int64_t total_bytes_needed = 0;
-    int slice_redist_range = FFMIN(SLICE_REDIST_TOTAL, s->num_x);
+    int slice_redist_range = FFMIN(SLICE_REDIST_TOTAL, s->num_y_partial*s->num_x);
     SliceArgs *enc_args = s->slice_args;
     SliceArgs *top_loc[SLICE_REDIST_TOTAL] = {NULL};
 
     init_quant_matrix(s);
 
+    for (slice_y = 0; slice_y < s->num_y_partial; slice_y++) {
     for (slice_x = 0; slice_x < s->num_x; slice_x++) {
-        SliceArgs *args = &enc_args[slice_x];
+        SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
         args->bits_ceil  = s->slice_max_bytes << 3;
         args->bits_floor = s->slice_min_bytes << 3;
         memset(args->cache, 0, s->q_ceil*sizeof(*args->cache));
     }
+    }
 
     /* First pass - determine baseline slice sizes w.r.t. max_slice_size */
-    s->avctx->execute(s->avctx, rate_control, enc_args, NULL, s->num_x,
+    s->avctx->execute(s->avctx, rate_control, enc_args, NULL, s->num_y_partial*s->num_x,
                       sizeof(SliceArgs));
 
-    for (i = 0; i < s->num_x; i++) {
+    for (i = 0; i < s->num_y_partial*s->num_x; i++) {
         SliceArgs *args = &enc_args[i];
         bytes_left += s->slice_max_bytes - args->bytes;
         for (j = 0; j < slice_redist_range; j++) {
@@ -785,7 +788,7 @@ static int calc_slice_sizes(VC2EncContext *s)
             break;
     }
 
-    for (i = 0; i < s->num_x; i++) {
+    for (i = 0; i < s->num_y_partial*s->num_x; i++) {
         SliceArgs *args = &enc_args[i];
         total_bytes_needed += args->bytes;
         s->q_avg += args->quant_idx;
@@ -961,14 +964,14 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
 #if THREADED_TRANSFORM
     s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
-            s->num_x*3);
+            s->num_y_partial*s->num_x*3);
 #else
-    for (i = 0; i < s->num_x*3; i++)
+    for (i = 0; i < s->num_y_partial*s->num_x*3; i++)
         dwt_slice(s->avctx, NULL, i, 0);
 #endif
 
     max_frame_bytes = header_size + calc_slice_sizes(s)
-        + (s->num_x / s->fragment_size) * (13+12); /* "BBCD" header and fragment header */;
+        + s->num_y_partial*(s->num_x / s->fragment_size) * (13+12); /* "BBCD" header and fragment header */;
 
     ret = ff_alloc_packet2(s->avctx, avpkt,
             max_frame_bytes,
@@ -1048,8 +1051,8 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     int64_t max_frame_bytes, r_bitrate = avctx->bit_rate >> (s->interlaced);
 
     if (frame->width != s->plane[0].width
-            || frame->height != s->plane[0].slice_h) {
-        av_log(avctx, AV_LOG_ERROR, "given picture size (%dx%d) is not a row of slices (%dx%d)\n",
+            || frame->height % s->plane[0].slice_h) {
+        av_log(avctx, AV_LOG_ERROR, "given picture size (%dx%d) is not rows of slices (%dx%d)\n",
               frame->width, frame->height, s->plane[0].width, s->plane[0].slice_h);
         return AVERROR(EINVAL);
     }
@@ -1062,6 +1065,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
     s->avctx = avctx;
     s->prev_parse_info_position = -1;
+    s->num_y_partial = frame->height / s->slice_height;
 
     if (!frame->pos_y) {
         s->size_scaler = 2;
@@ -1090,7 +1094,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     flush_put_bits(&s->pb);
     avpkt->size = put_bits_count(&s->pb) >> 3;
 
-    s->expected_pos_y += s->plane[0].slice_h;
+    s->expected_pos_y += frame->height;
     if (s->expected_pos_y >= avctx->height)
         s->expected_pos_y = 0;
 
