@@ -737,12 +737,12 @@ static int calc_slice_sizes(VC2EncContext *s)
     init_quant_matrix(s);
 
     for (slice_y = 0; slice_y < s->num_y_partial; slice_y++) {
-    for (slice_x = 0; slice_x < s->num_x; slice_x++) {
-        SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
-        args->bits_ceil  = s->slice_max_bytes << 3;
-        args->bits_floor = s->slice_min_bytes << 3;
-        memset(args->cache, 0, s->q_ceil*sizeof(*args->cache));
-    }
+        for (slice_x = 0; slice_x < s->num_x; slice_x++) {
+            SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
+            args->bits_ceil  = s->slice_max_bytes << 3;
+            args->bits_floor = s->slice_min_bytes << 3;
+            memset(args->cache, 0, s->q_ceil*sizeof(*args->cache));
+        }
     }
 
     /* First pass - determine baseline slice sizes w.r.t. max_slice_size */
