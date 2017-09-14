@@ -359,7 +359,10 @@ static void encode_frame_rate(VC2EncContext *s)
     if (!s->strict_compliance) {
         AVCodecContext *avctx = s->avctx;
         put_vc2_ue_uint(&s->pb, 0);
-        put_vc2_ue_uint(&s->pb, avctx->time_base.den);
+        if (s->interlaced)
+            put_vc2_ue_uint(&s->pb, avctx->time_base.den/2);
+        else
+            put_vc2_ue_uint(&s->pb, avctx->time_base.den);
         put_vc2_ue_uint(&s->pb, avctx->time_base.num);
     }
 }
@@ -1146,17 +1149,20 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                       (avctx->field_order == AV_FIELD_PROGRESSIVE));
 
     int height = avctx->height;
-    if (s->interlaced)
+    AVRational tb = avctx->time_base;
+    if (s->interlaced) {
         height *= 2;
+        tb.den /= 2;
+    }
 
     for (i = 0; i < base_video_fmts_len; i++) {
         const VC2BaseVideoFormat *fmt = &base_video_fmts[i];
         if (avctx->pix_fmt != fmt->pix_fmt)
             continue;
         /* TODO: what to do about field separated pictures and their 2x rate */
-        if (avctx->time_base.num != fmt->time_base.num)
+        if (tb.num != fmt->time_base.num)
             continue;
-        if (avctx->time_base.den != fmt->time_base.den)
+        if (tb.den != fmt->time_base.den)
             continue;
         if (avctx->width != fmt->width)
             continue;
