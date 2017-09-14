@@ -1150,7 +1150,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     AVRational tb = avctx->time_base;
     if (s->interlaced) {
         height *= 2;
-        tb.den /= 2
+        tb.den /= 2;
     }
 
     for (i = 0; i < base_video_fmts_len; i++) {
