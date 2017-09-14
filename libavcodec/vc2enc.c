@@ -112,7 +112,6 @@ typedef struct Plane {
 
 typedef struct SliceArgs {
     PutBitContext pb;
-    PutBitContext *pb2;
     int cache[DIRAC_MAX_QUANT_INDEX];
     void *ctx;
     int x;
@@ -682,11 +681,27 @@ static int rate_control(AVCodecContext *avctx, void *arg)
 {
     SliceArgs *slice_dat = arg;
     VC2EncContext *s = slice_dat->ctx;
+
+    /* Sets a top target which is the maximum slice size */
     const int top = slice_dat->bits_ceil;
+
+    /* Sets a bottom target which is the maximum slice size/tolerance value */
     const int bottom = slice_dat->bits_floor;
+
+    /* Keeps the previous 2 quantization index values if the second last is
+     * identical to the current it means it's entered an infinite loop -
+     * E.g. 12, 13, 12, 13, 12 - neither satisfy the target range, so break out
+     * and pick the lowest value - waste goes to the second pass */
     int quant_buf[2] = {-1, -1};
-    int quant = slice_dat->quant_idx, step = 1;
+
+    /* Starts from the previous quantization index (if it exists) */
+    int quant = slice_dat->quant_idx;
+
+    /* Step size depending on how far away it is from satisfying the range */
+    int step = 1;
+
     int bits_last, bits = count_hq_slice(slice_dat, quant);
+
     while ((bits > top) || (bits < bottom)) {
         const int signed_step = bits > top ? +step : -step;
         quant  = av_clip(quant + signed_step, 0, s->q_ceil-1);
@@ -696,7 +711,7 @@ static int rate_control(AVCodecContext *avctx, void *arg)
             bits  = quant == quant_buf[0] ? bits_last : bits;
             break;
         }
-        step         = av_clip(step/2, 1, (s->q_ceil-1)/2);
+        step         = av_clip(step/2, 1, (s->q_ceil - 1)/2);
         quant_buf[1] = quant_buf[0];
         quant_buf[0] = quant;
         bits_last    = bits;
@@ -788,9 +803,6 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
     const int quant_idx = slice_dat->quant_idx;
     uint8_t quants[MAX_DWT_LEVELS][4];
     int i, level, orientation;
-
-    if (slice_dat->pb2)
-        pb = slice_dat->pb2;
 
     /* The reference decoder ignores it, and its typical length is 0 */
     memset(put_bits_ptr(pb), 0, s->prefix_bytes);
@@ -934,9 +946,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                         const char *aux_data, const int header_size, int field)
 {
     int i, ret;
-    int64_t max_frame_bytes = s->avctx->width * s->avctx->height
-                            * 3 /*three samples per pixel */
-                            * 4 /*four bytes per coefficient (maybe) */;
+    int64_t max_frame_bytes;
     int y = frame->pos_y / s->slice_height;
 
     /* Threaded DWT transform */
@@ -988,7 +998,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     /* Encode slices */
     for (int x = 0; x < s->num_x; x++) {
         SliceArgs *arg = &s->slice_args[x];
-        arg->pb2 = &s->pb;
+        uint8_t *buf;
 
         if (!(x % s->fragment_size)) {
             if (s->prev_parse_info_position >= 0)
@@ -998,9 +1008,19 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
             avpriv_align_put_bits(&s->pb);
         }
 
-        encode_hq_slice(s->avctx, arg);
+        avpriv_align_put_bits(&s->pb);
+        flush_put_bits(&s->pb);
+        buf = put_bits_ptr(&s->pb);
+
+        assert(arg->bytes > 0);
+
+        init_put_bits(&arg->pb, buf, arg->bytes+s->prefix_bytes);
+
+        /* Skips the main put_bits's position by the total slice bytes */
+        skip_put_bytes(&s->pb, arg->bytes+s->prefix_bytes);
     }
 
+    s->avctx->execute(s->avctx, encode_hq_slice, s->slice_args, NULL, s->num_x, sizeof(SliceArgs));
 
     write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
 
