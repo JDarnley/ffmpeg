@@ -384,7 +384,7 @@ int av_dirac_parse_sequence_header(AVDiracSeqHeader **pdsh,
     picture_coding_mode = get_interleaved_ue_golomb(&gb);
     if (picture_coding_mode != 0) {
         if (log_ctx) {
-            av_log(log_ctx, AV_LOG_ERROR, "Unsupported picture coding mode %d",
+            av_log(log_ctx, AV_LOG_ERROR, "Unsupported picture coding mode %d\n",
                    picture_coding_mode);
         }
         ret = AVERROR_INVALIDDATA;

@@ -2100,7 +2100,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         /* [DIRAC_STD] 10. Sequence header */
         ret = av_dirac_parse_sequence_header(&dsh, buf + DATA_UNIT_HEADER_SIZE, size - DATA_UNIT_HEADER_SIZE, avctx);
         if (ret < 0) {
-            av_log(avctx, AV_LOG_ERROR, "error parsing sequence header");
+            av_log(avctx, AV_LOG_ERROR, "error parsing sequence header\n");
             return ret;
         }
 
