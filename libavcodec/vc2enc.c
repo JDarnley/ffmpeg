@@ -1067,8 +1067,6 @@ static av_cold int vc2_encode_end(AVCodecContext *avctx)
 
 static av_cold int vc2_encode_init(AVCodecContext *avctx)
 {
-    Plane *p;
-    SubBand *b;
     int i, j, level, o, shift, ret;
     const AVPixFmtDescriptor *fmt = av_pix_fmt_desc_get(avctx->pix_fmt);
     const int depth = fmt->comp[0].depth;
@@ -1171,7 +1169,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     /* Planes initialization */
     for (i = 0; i < 3; i++) {
         int w, h;
-        p = &s->plane[i];
+        Plane *p = &s->plane[i];
         p->width      = avctx->width  >> (i ? s->chroma_x_shift : 0);
         p->height     = avctx->height >> (i ? s->chroma_y_shift : 0);
         if (s->interlaced)
@@ -1186,7 +1184,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
             w = w >> 1;
             h = h >> 1;
             for (o = 0; o < 4; o++) {
-                b = &p->band[level][o];
+                SubBand *b = &p->band[level][o];
                 b->width  = w;
                 b->height = h;
                 b->stride = p->coef_stride;
