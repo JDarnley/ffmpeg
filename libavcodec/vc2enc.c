@@ -29,6 +29,9 @@
 #include "vc2enc_dwt.h"
 #include "diractab.h"
 
+#define NEW_SLICES 1
+#define THREADED_TRANSFORM 1
+
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
 #define COEF_LUT_TAB 2048
@@ -92,6 +95,7 @@ typedef struct SubBand {
     ptrdiff_t stride;
     int width;
     int height;
+    int left, right, top, bottom;
 } SubBand;
 
 typedef struct Plane {
@@ -102,6 +106,8 @@ typedef struct Plane {
     int dwt_width;
     int dwt_height;
     ptrdiff_t coef_stride;
+    int slice_w, slice_h;
+    int align_w, align_h;
 } Plane;
 
 typedef struct SliceArgs {
@@ -119,10 +125,8 @@ typedef struct SliceArgs {
 typedef struct TransformArgs {
     void *ctx;
     Plane *plane;
-    void *idata;
-    ptrdiff_t istride;
-    int field;
     VC2TransformContext t;
+    const AVFrame *frame;
 } TransformArgs;
 
 typedef struct VC2EncContext {
@@ -158,6 +162,7 @@ typedef struct VC2EncContext {
 
     int num_x; /* #slices horizontally */
     int num_y; /* #slices vertically */
+    int num_y_partial;
     int prefix_bytes;
     int size_scaler;
     int chroma_x_shift;
@@ -169,6 +174,7 @@ typedef struct VC2EncContext {
     int slice_min_bytes;
     int q_ceil;
     int q_avg;
+    int64_t slice_count;
 
     /* Options */
     double tolerance;
@@ -181,8 +187,14 @@ typedef struct VC2EncContext {
     enum VC2_QM quant_matrix;
 
     /* Parse code state */
-    uint32_t next_parse_offset;
-    enum DiracParseCodes last_parse_code;
+    int prev_parse_info_position;
+    uint32_t prev_offset;
+
+    int const_quant;
+
+    int fragment_size;
+
+    int expected_pos_y;
 } VC2EncContext;
 
 /* Puts an unsigned golomb code to the bitstream */
@@ -266,30 +278,33 @@ static av_always_inline void get_vc2_ue_uint(int val, uint8_t *nbits,
 /* VC-2 10.4 - parse_info() - keeps track of how many bytes it's been since the
  * last header the specs mention that you can just put 0 as the distance but the
  * libavcodec parser still needs them because the format sucks */
-static void encode_parse_info(VC2EncContext *s, enum DiracParseCodes pcode)
+static void encode_parse_info(VC2EncContext *s, enum DiracParseCodes pcode,
+        uint32_t next, uint32_t prev)
 {
-    uint32_t cur_pos, dist;
-
     avpriv_align_put_bits(&s->pb);
-
-    cur_pos = put_bits_count(&s->pb) >> 3;
+    s->prev_parse_info_position = put_bits_count(&s->pb) >> 3;
+    s->prev_offset = next;
 
     /* Magic string */
     avpriv_put_string(&s->pb, "BBCD", 0);
-
     /* Parse code */
     put_bits(&s->pb, 8, pcode);
-
     /* Next parse offset */
-    dist = cur_pos - s->next_parse_offset;
-    AV_WB32(s->pb.buf + s->next_parse_offset + 5, dist);
-    s->next_parse_offset = cur_pos;
-    put_bits32(&s->pb, pcode == DIRAC_PCODE_END_SEQ ? 13 : 0);
-
+    put_bits32(&s->pb, next);
     /* Last parse offset */
-    put_bits32(&s->pb, s->last_parse_code == DIRAC_PCODE_END_SEQ ? 13 : dist);
+    put_bits32(&s->pb, prev);
+}
 
-    s->last_parse_code = pcode;
+static void write_prev_parse_info_next_offset(VC2EncContext *s, uint32_t value)
+{
+    uint8_t *ptr = s->pb.buf + s->prev_parse_info_position + 5;
+    s->prev_offset = value;
+    AV_WB32(ptr, value);
+}
+
+static uint32_t get_distance_from_prev_parse_info(VC2EncContext *s)
+{
+    return (put_bits_count(&s->pb) + 7 >> 3) - s->prev_parse_info_position;
 }
 
 /* VC-2 11.1 - parse_parameters()
@@ -313,7 +328,10 @@ static void encode_frame_size(VC2EncContext *s)
     if (!s->strict_compliance) {
         AVCodecContext *avctx = s->avctx;
         put_vc2_ue_uint(&s->pb, avctx->width);
-        put_vc2_ue_uint(&s->pb, avctx->height);
+        if (s->interlaced)
+            put_vc2_ue_uint(&s->pb, 2*avctx->height);
+        else
+            put_vc2_ue_uint(&s->pb, avctx->height);
     }
 }
 
@@ -348,7 +366,10 @@ static void encode_frame_rate(VC2EncContext *s)
     if (!s->strict_compliance) {
         AVCodecContext *avctx = s->avctx;
         put_vc2_ue_uint(&s->pb, 0);
-        put_vc2_ue_uint(&s->pb, avctx->time_base.den);
+        if (s->interlaced)
+            put_vc2_ue_uint(&s->pb, avctx->time_base.den/2);
+        else
+            put_vc2_ue_uint(&s->pb, avctx->time_base.den);
         put_vc2_ue_uint(&s->pb, avctx->time_base.num);
     }
 }
@@ -447,13 +468,6 @@ static void encode_seq_header(VC2EncContext *s)
     put_vc2_ue_uint(&s->pb, s->interlaced); /* Frames or fields coding */
 }
 
-/* VC-2 12.1 - picture_header() */
-static void encode_picture_header(VC2EncContext *s)
-{
-    avpriv_align_put_bits(&s->pb);
-    put_bits32(&s->pb, s->picture_number++);
-}
-
 /* VC-2 12.3.4.1 - slice_parameters() */
 static void encode_slice_params(VC2EncContext *s)
 {
@@ -546,24 +560,27 @@ static void encode_transform_params(VC2EncContext *s)
     put_vc2_ue_uint(&s->pb, s->wavelet_idx);
     put_vc2_ue_uint(&s->pb, s->wavelet_depth);
 
+    if (s->ver.major >= 3) {
+        /* extended_transform_parameters */
+        put_bits(&s->pb, 1, 0); /* asym_transform_index_flag */
+        put_bits(&s->pb, 1, 0); /* asym_transform_flag */
+    }
+
     encode_slice_params(s);
     encode_quant_matrix(s);
 }
 
-/* VC-2 12.2 - wavelet_transform() */
-static void encode_wavelet_transform(VC2EncContext *s)
-{
-    encode_transform_params(s);
-    avpriv_align_put_bits(&s->pb);
-}
-
-/* VC-2 12 - picture_parse() */
-static void encode_picture_start(VC2EncContext *s)
+static void encode_fragment_header(VC2EncContext *s, int slice_count, int x_offset, int y_offset)
 {
     avpriv_align_put_bits(&s->pb);
-    encode_picture_header(s);
-    avpriv_align_put_bits(&s->pb);
-    encode_wavelet_transform(s);
+    put_bits32(&s->pb, s->picture_number);
+    put_bits(&s->pb, 16, 0);
+    put_bits(&s->pb, 16, slice_count);
+    if (slice_count) {
+        put_bits(&s->pb, 16, x_offset);
+        put_bits(&s->pb, 16, y_offset);
+    } else
+        s->picture_number++;
 }
 
 /* Quantize a single unsigned coefficient - left shift on signed is undefined,
@@ -571,24 +588,24 @@ static void encode_picture_start(VC2EncContext *s)
 #define QUANT(c, qf) (((c) << 2)/(qf))
 
 /* VC-2 13.5.5.2 - slice_band() */
-static void encode_subband(VC2EncContext *s, PutBitContext *pb, int sx, int sy,
-                           SubBand *b, int quant)
+
+static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
+                            int sx, int sy,
+                            SubBand *b, int quant)
 {
     int x, y;
-
-    const int left   = b->width  * (sx+0) / s->num_x;
-    const int right  = b->width  * (sx+1) / s->num_x;
-    const int top    = b->height * (sy+0) / s->num_y;
-    const int bottom = b->height * (sy+1) / s->num_y;
 
     const int qfactor = ff_dirac_qscale_tab[quant];
     const uint8_t  *len_lut = &s->coef_lut_len[quant*COEF_LUT_TAB];
     const uint32_t *val_lut = &s->coef_lut_val[quant*COEF_LUT_TAB];
 
-    dwtcoef *coeff = b->buf + top * b->stride;
+    dwtcoef *coeff = p->coef_buf
+                   + sx*p->slice_w
+                   + sy*p->slice_h*p->coef_stride
+                   + b->top*p->coef_stride;
 
-    for (y = top; y < bottom; y++) {
-        for (x = left; x < right; x++) {
+    for (y = b->top; y < b->bottom; y++) {
+        for (x = b->left; x < b->right; x++) {
             const int neg = coeff[x] < 0;
             uint32_t c_abs = FFABS(coeff[x]);
             if (c_abs < COEF_LUT_TAB) {
@@ -601,7 +618,7 @@ static void encode_subband(VC2EncContext *s, PutBitContext *pb, int sx, int sy,
                     put_bits(pb, 1, neg);
             }
         }
-        coeff += b->stride;
+        coeff += p->coef_stride;
     }
 }
 
@@ -609,8 +626,10 @@ static int count_hq_slice(SliceArgs *slice, int quant_idx)
 {
     int x, y;
     uint8_t quants[MAX_DWT_LEVELS][4];
-    int bits = 0, p, level, orientation;
+    int bits = 0, i, level, orientation;
     VC2EncContext *s = slice->ctx;
+    int sx = slice->x;
+    int sy = slice->y;
 
     /* Check the cache */
     if (slice->cache[quant_idx])
@@ -623,24 +642,28 @@ static int count_hq_slice(SliceArgs *slice, int quant_idx)
         for (orientation = !!level; orientation < 4; orientation++)
             quants[level][orientation] = FFMAX(quant_idx - s->quant[level][orientation], 0);
 
-    for (p = 0; p < 3; p++) {
+    for (i = 0; i < 3; i++) {
+        Plane *p = &s->plane[i];
         int bytes_start, bytes_len, pad_s, pad_c;
         bytes_start = bits >> 3;
         bits += 8;
         for (level = 0; level < s->wavelet_depth; level++) {
             for (orientation = !!level; orientation < 4; orientation++) {
-                SubBand *b = &s->plane[p].band[level][orientation];
+                SubBand *b = &s->plane[i].band[level][orientation];
 
                 const int q_idx = quants[level][orientation];
                 const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
                 const int qfactor = ff_dirac_qscale_tab[q_idx];
 
-                const int left   = b->width  * slice->x    / s->num_x;
-                const int right  = b->width  *(slice->x+1) / s->num_x;
-                const int top    = b->height * slice->y    / s->num_y;
-                const int bottom = b->height *(slice->y+1) / s->num_y;
+                const int left   = b->left;
+                const int right  = b->right;
+                const int top    = b->top;
+                const int bottom = b->bottom;
 
-                dwtcoef *buf = b->buf + top * b->stride;
+                dwtcoef *buf = p->coef_buf
+                               + sx*p->slice_w
+                               + sy*p->slice_h*p->coef_stride
+                               + top*p->coef_stride;
 
                 for (y = top; y < bottom; y++) {
                     for (x = left; x < right; x++) {
@@ -721,7 +744,7 @@ static int calc_slice_sizes(VC2EncContext *s)
     int i, j, slice_x, slice_y, bytes_left = 0;
     int bytes_top[SLICE_REDIST_TOTAL] = {0};
     int64_t total_bytes_needed = 0;
-    int slice_redist_range = FFMIN(SLICE_REDIST_TOTAL, s->num_x*s->num_y);
+    int slice_redist_range = FFMIN(SLICE_REDIST_TOTAL, s->num_y_partial*s->num_x);
     SliceArgs *enc_args = s->slice_args;
     SliceArgs *top_loc[SLICE_REDIST_TOTAL] = {NULL};
 
@@ -729,12 +752,9 @@ static int calc_slice_sizes(VC2EncContext *s)
     init_quant_matrix(s);
 
     /* Initialize the slice contexts - doesn't reset the quantization index */
-    for (slice_y = 0; slice_y < s->num_y; slice_y++) {
+    for (slice_y = 0; slice_y < s->num_y_partial; slice_y++) {
         for (slice_x = 0; slice_x < s->num_x; slice_x++) {
             SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
-            args->ctx = s;
-            args->x   = slice_x;
-            args->y   = slice_y;
             args->bits_ceil  = s->slice_max_bytes << 3;
             args->bits_floor = s->slice_min_bytes << 3;
             memset(args->cache, 0, s->q_ceil*sizeof(*args->cache));
@@ -744,11 +764,11 @@ static int calc_slice_sizes(VC2EncContext *s)
     /* 1st pass - strictly fits the slices under the maximum slice size,
      * aligning the slice size to below the maximum slice size wastes bits
      * which get used by the second pass */
-    s->avctx->execute(s->avctx, rate_control, enc_args, NULL, s->num_x*s->num_y,
+    s->avctx->execute(s->avctx, rate_control, enc_args, NULL, s->num_y_partial*s->num_x,
                       sizeof(SliceArgs));
 
     /* Fill up the pointers to the most costly slice_redist_range number of slices */
-    for (i = 0; i < s->num_x*s->num_y; i++) {
+    for (i = 0; i < s->num_y_partial*s->num_x; i++) {
         SliceArgs *args = &enc_args[i];
         bytes_left += args->bytes;
         for (j = 0; j < slice_redist_range; j++) {
@@ -794,10 +814,11 @@ static int calc_slice_sizes(VC2EncContext *s)
     /* Counts total bytes for each slices to know how big of a packet to allocate,
      * keeps track of the average quantizer used, generally anything above 50
      * will give a gray frame */
-    for (i = 0; i < s->num_x*s->num_y; i++) {
+    for (i = 0; i < s->num_y_partial*s->num_x; i++) {
         SliceArgs *args = &enc_args[i];
         total_bytes_needed += args->bytes;
-        s->q_avg = (s->q_avg + args->quant_idx)/2;
+        s->q_avg += args->quant_idx;
+        s->slice_count += 1;
     }
 
     return total_bytes_needed;
@@ -812,9 +833,8 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
     const int slice_x = slice_dat->x;
     const int slice_y = slice_dat->y;
     const int quant_idx = slice_dat->quant_idx;
-    const int slice_bytes_max = slice_dat->bytes;
     uint8_t quants[MAX_DWT_LEVELS][4];
-    int p, level, orientation;
+    int i, level, orientation;
 
     /* The reference decoder ignores it, and its typical length is 0 */
     memset(put_bits_ptr(pb), 0, s->prefix_bytes);
@@ -828,27 +848,22 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
             quants[level][orientation] = FFMAX(quant_idx - s->quant[level][orientation], 0);
 
     /* Luma + 2 Chroma planes */
-    for (p = 0; p < 3; p++) {
+    for (i = 0; i < 3; i++) {
         int bytes_start, bytes_len, pad_s, pad_c;
+        Plane *p = &s->plane[i];
         bytes_start = put_bits_count(pb) >> 3;
         put_bits(pb, 8, 0);
         for (level = 0; level < s->wavelet_depth; level++) {
             for (orientation = !!level; orientation < 4; orientation++) {
-                encode_subband(s, pb, slice_x, slice_y,
-                               &s->plane[p].band[level][orientation],
+                encode_subband2(s, pb, p, slice_x, slice_y,
+                               &p->band[level][orientation],
                                quants[level][orientation]);
             }
         }
         avpriv_align_put_bits(pb);
         bytes_len = (put_bits_count(pb) >> 3) - bytes_start - 1;
-        if (p == 2) {
-            int len_diff = slice_bytes_max - (put_bits_count(pb) >> 3);
-            pad_s = FFALIGN((bytes_len + len_diff), s->size_scaler)/s->size_scaler;
-            pad_c = (pad_s*s->size_scaler) - bytes_len;
-        } else {
             pad_s = FFALIGN(bytes_len, s->size_scaler)/s->size_scaler;
             pad_c = (pad_s*s->size_scaler) - bytes_len;
-        }
         pb->buf[bytes_start] = pad_s;
         flush_put_bits(pb);
         /* vc2-reference uses that padding that decodes to '0' coeffs -
@@ -857,34 +872,6 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
         memset(put_bits_ptr(pb), 0xFF, pad_c);
         skip_put_bytes(pb, pad_c);
     }
-
-    return 0;
-}
-
-/* VC-2 13.5.1 - low_delay_transform_data() */
-static int encode_slices(VC2EncContext *s)
-{
-    uint8_t *buf;
-    int slice_x, slice_y, skip = 0;
-    SliceArgs *enc_args = s->slice_args;
-
-    avpriv_align_put_bits(&s->pb);
-    flush_put_bits(&s->pb);
-    buf = put_bits_ptr(&s->pb);
-
-    for (slice_y = 0; slice_y < s->num_y; slice_y++) {
-        for (slice_x = 0; slice_x < s->num_x; slice_x++) {
-            SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
-            /* Inits a separate put_bits context for each slice at a given position */
-            init_put_bits(&args->pb, buf + skip, args->bytes+s->prefix_bytes);
-            skip += args->bytes;
-        }
-    }
-
-    s->avctx->execute(s->avctx, encode_hq_slice, enc_args, NULL, s->num_x*s->num_y,
-                      sizeof(SliceArgs));
-    /* Skips the main put_bits's position by the total slice bytes */
-    skip_put_bytes(&s->pb, skip);
 
     return 0;
 }
@@ -924,66 +911,71 @@ static int encode_slices(VC2EncContext *s)
  * of levels. The rest of the areas can be thought as the details needed
  * to restore the image perfectly to its original size.
  */
-static int dwt_plane(AVCodecContext *avctx, void *arg)
+
+static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
-    TransformArgs *transform_dat = arg;
-    VC2EncContext *s = transform_dat->ctx;
-    const void *frame_data = transform_dat->idata;
-    const ptrdiff_t linesize = transform_dat->istride;
-    const int field = transform_dat->field;
-    const Plane *p = transform_dat->plane;
-    VC2TransformContext *t = &transform_dat->t;
-    dwtcoef *buf = p->coef_buf;
-    const int idx = s->wavelet_idx;
-    const int skip = 1 + s->interlaced;
+    int i_plane            = jobnr % 3;
+    int i_slice            = jobnr / 3;
+    VC2EncContext *s       = avctx->priv_data;
+    TransformArgs *ta      = &s->transform_args[i_plane];
+    SliceArgs *slice       = &s->slice_args[i_slice];
+    Plane *p               = &s->plane[i_plane];
+    const AVFrame *frame   = ta->frame;
+    VC2TransformContext *t = &ta->t;
+    const int idx          = s->wavelet_idx;
+    const int skip         = 1;
 
-    int x, y, level, offset;
-    ptrdiff_t pix_stride = linesize >> (s->bpp - 1);
+    int w = p->slice_w, h = p->slice_h;
+    int x = slice->x,   y = slice->y;
 
-    /* Will skip 2*stride and offset it in interlaced mode */
-    if (field == 1) {
-        offset = 0;
-        pix_stride <<= 1;
-    } else if (field == 2) {
-        offset = pix_stride;
-        pix_stride <<= 1;
-    } else {
-        offset = 0;
-    }
+    /* pixel frame stride is in bytes but sample size is needed */
+    ptrdiff_t pixel_stride = frame->linesize[i_plane] >> (s->bpp - 1);
+    /* coeff stride is in number of values */
+    ptrdiff_t coeff_stride = p->coef_stride;
+    dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
+    dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
+
+    ptrdiff_t offset = x*w + y*h*pixel_stride;
 
     /* Copy and convert unsigned to signed using s->diff_offset */
     if (s->bpp == 1) {
-        const uint8_t *pix = (const uint8_t *)frame_data + offset;
-        for (y = 0; y < p->height*skip; y+=skip) {
-            for (x = 0; x < p->width; x++) {
+        dwtcoef *buf = coeff_data;
+        const uint8_t *pix = (const uint8_t *)frame->data[i_plane] + offset;
+        for (int y = 0; y < h*skip; y+=skip) {
+            for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
-            buf += p->coef_stride;
-            pix += pix_stride;
+            buf += coeff_stride;
+            pix += pixel_stride;
         }
     } else {
-        const uint16_t *pix = (const uint16_t *)frame_data + offset;
-        for (y = 0; y < p->height*skip; y+=skip) {
-            for (x = 0; x < p->width; x++) {
+        dwtcoef *buf = coeff_data;
+        const uint16_t *pix = (const uint16_t *)frame->data[i_plane] + offset;
+        for (int y = 0; y < h*skip; y+=skip) {
+            for (int x = 0; x < w; x++) {
                 buf[x] = pix[x] - s->diff_offset;
             }
-            buf += p->coef_stride;
-            pix += pix_stride;
+            buf += coeff_stride;
+            pix += pixel_stride;
         }
     }
 
-    /* Zero the padding out */
-    memset(buf, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
-
-    /* Do the actual dwt */
-    for (level = s->wavelet_depth-1; level >= 0; level--) {
-        const SubBand *b = &p->band[level][0];
-        t->vc2_subband_dwt[idx](t, p->coef_buf, p->coef_stride,
-                                b->width, b->height);
+    for (int level = s->wavelet_depth-1; level >= 0; level--) {
+        w >>= 1;
+        h >>= 1;
+        t->vc2_subband_dwt[idx](transform_buf, coeff_data, coeff_stride,
+                w, h);
     }
 
     return 0;
 }
+
+/**
+ * Dirac Specification ->
+ * 9.6 Parse Info Header Syntax. parse_info()
+ * 4 byte start code + byte parse code + 4 byte size + 4 byte previous size
+ */
+#define DATA_UNIT_HEADER_SIZE 13
 
 /* Field - 0 progressive, 1 - top field, 2 - bottom field */
 static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
@@ -991,52 +983,87 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
 {
     int i, ret;
     int64_t max_frame_bytes;
+    int y = frame->pos_y / s->slice_height;
 
-     /* Threaded DWT transform */
+    /* Threaded DWT transform */
     for (i = 0; i < 3; i++) {
+        Plane *p = &s->plane[i];
         s->transform_args[i].ctx   = s;
-        s->transform_args[i].field = field;
-        s->transform_args[i].plane = &s->plane[i];
-        s->transform_args[i].idata = frame->data[i];
-        s->transform_args[i].istride = frame->linesize[i];
+        s->transform_args[i].plane = p;
+        s->transform_args[i].frame = frame;
     }
-    s->avctx->execute(s->avctx, dwt_plane, s->transform_args, NULL, 3,
-                      sizeof(TransformArgs));
+#if THREADED_TRANSFORM
+    s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
+            s->num_y_partial*s->num_x*3);
+#else
+    for (i = 0; i < s->num_y_partial*s->num_x*3; i++)
+        dwt_slice(s->avctx, NULL, i, 0);
+#endif
 
-    /* Calculate per-slice quantizers and sizes */
-    max_frame_bytes = header_size + calc_slice_sizes(s);
+    max_frame_bytes = header_size + calc_slice_sizes(s)
+        + s->num_y_partial*(s->num_x / s->fragment_size) * (13+12); /* "BBCD" header and fragment header */;
 
-    /* Allocates the packet on the first field */
-    if (field < 2) {
-        ret = ff_alloc_packet2(s->avctx, avpkt,
-                               max_frame_bytes << s->interlaced,
-                               max_frame_bytes << s->interlaced);
-        if (ret) {
-            av_log(s->avctx, AV_LOG_ERROR, "Error getting output packet.\n");
-            return ret;
+    ret = ff_alloc_packet2(s->avctx, avpkt,
+            max_frame_bytes,
+            max_frame_bytes);
+    if (ret) {
+        av_log(s->avctx, AV_LOG_ERROR, "Error getting output packet.\n");
+        return ret;
+    }
+    init_put_bits(&s->pb, avpkt->data, avpkt->size);
+
+    if (frame->pos_y == 0) {
+        /* Sequence header */
+        encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, s->prev_offset);
+        encode_seq_header(s);
+
+        /* Encoder version */
+        if (aux_data) {
+            write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
+            encode_parse_info(s, DIRAC_PCODE_AUX, DATA_UNIT_HEADER_SIZE + strlen(aux_data) + 1, s->prev_offset);
+            avpriv_put_string(&s->pb, aux_data, 1);
         }
-        init_put_bits(&s->pb, avpkt->data, avpkt->size);
+
+        /* (14. Fragment Syntax) */
+        write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
+        encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
+        encode_fragment_header(s, 0, 0, 0);
+        encode_transform_params(s);
     }
-
-    /* Sequence header */
-    encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER);
-    encode_seq_header(s);
-
-    /* Encoder version */
-    if (aux_data) {
-        encode_parse_info(s, DIRAC_PCODE_AUX);
-        avpriv_put_string(&s->pb, aux_data, 1);
-    }
-
-    /* Picture header */
-    encode_parse_info(s, DIRAC_PCODE_PICTURE_HQ);
-    encode_picture_start(s);
 
     /* Encode slices */
-    encode_slices(s);
+    for (int x = 0; x < s->num_x; x++) {
+        SliceArgs *arg = &s->slice_args[x];
+        uint8_t *buf;
+
+        if (!(x % s->fragment_size)) {
+            if (s->prev_parse_info_position >= 0)
+                write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
+            encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
+            encode_fragment_header(s, s->fragment_size, x, y);
+            avpriv_align_put_bits(&s->pb);
+        }
+
+        avpriv_align_put_bits(&s->pb);
+        flush_put_bits(&s->pb);
+        buf = put_bits_ptr(&s->pb);
+
+        assert(arg->bytes > 0);
+
+        init_put_bits(&arg->pb, buf, arg->bytes+s->prefix_bytes);
+
+        /* Skips the main put_bits's position by the total slice bytes */
+        skip_put_bytes(&s->pb, arg->bytes+s->prefix_bytes);
+    }
+
+    s->avctx->execute(s->avctx, encode_hq_slice, s->slice_args, NULL, s->num_x, sizeof(SliceArgs));
+
+    write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
 
     /* End sequence */
-    encode_parse_info(s, DIRAC_PCODE_END_SEQ);
+    if (frame->pos_y == s->avctx->height - s->plane[0].slice_h) {
+        encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
+    }
 
     return 0;
 }
@@ -1053,46 +1080,60 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     const int header_size = 100 + aux_data_size;
     int64_t r_bitrate = avctx->bit_rate >> (s->interlaced);
 
-    s->avctx = avctx;
-    s->size_scaler = 2;
-    s->prefix_bytes = 0;
-    s->last_parse_code = 0;
-    s->next_parse_offset = 0;
-
-    /* Rate control */
-    /* bitrate(per second)/framerate */
-    s->frame_max_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
-                                     s->avctx->time_base.den) >> 3) - header_size;
-    /* preliminary max slice size (max_frame_bytes/number_of_slices) */
-    s->slice_max_bytes = slice_ceil = av_rescale(s->frame_max_bytes, 1, s->num_x*s->num_y);
-
-    /* Find an appropriate size scaler, tricky, increasing s->size_scaler makes
-     * it safer but increases the padding */
-    while (sig_size > 255) {
-        int r_size = SSIZE_ROUND(s->slice_max_bytes);
-        if (r_size > slice_ceil) {
-            s->slice_max_bytes -= r_size - slice_ceil;
-            r_size = SSIZE_ROUND(s->slice_max_bytes);
-        }
-        sig_size = r_size/s->size_scaler; /* Signalled slize size */
-        s->size_scaler <<= 1;
+    if (frame->width != s->plane[0].width
+            || frame->height % s->plane[0].slice_h) {
+        av_log(avctx, AV_LOG_ERROR, "given picture size (%dx%d) is not rows of slices (%dx%d)\n",
+              frame->width, frame->height, s->plane[0].width, s->plane[0].slice_h);
+        return AVERROR(EINVAL);
     }
 
-    s->slice_min_bytes = s->slice_max_bytes - s->slice_max_bytes*(s->tolerance/100.0f);
+    if (frame->pos_x || frame->pos_y != s->expected_pos_y) {
+        av_log(avctx, AV_LOG_ERROR, "given picture at position (%d,%d) not at expected position (%d,%d)\n",
+                frame->pos_x, frame->pos_y, 0, s->expected_pos_y);
+        return AVERROR(EINVAL);
+    }
+
+    s->avctx = avctx;
+    s->prev_parse_info_position = -1;
+    s->num_y_partial = frame->height / s->slice_height;
+
+    if (!frame->pos_y) {
+        s->size_scaler = 2;
+        s->prefix_bytes = 0;
+
+        /* Rate control */
+        /* bitrate(per second)/framerate */
+        s->frame_max_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
+                                        s->avctx->time_base.den) >> 3) - header_size;
+        /* preliminary max slice size (max_frame_bytes/number_of_slices) */
+        s->slice_max_bytes = slice_ceil = av_rescale(s->frame_max_bytes, 1, s->num_x*s->num_y);
+
+        /* Find an appropriate size scaler */
+        while (sig_size > 255) {
+            int r_size = SSIZE_ROUND(s->slice_max_bytes);
+            if (r_size > slice_ceil) {
+                s->slice_max_bytes -= r_size - slice_ceil;
+                r_size = SSIZE_ROUND(s->slice_max_bytes);
+            }
+            sig_size = r_size/s->size_scaler; /* Signalled slize size */
+            s->size_scaler <<= 1;
+        }
+
+        s->slice_min_bytes = s->slice_max_bytes - s->slice_max_bytes*(s->tolerance/100.0f);
+    }
 
     /* Calls encode_frame() once for each field (or once for progressive) */
 
     ret = encode_frame(s, avpkt, frame, aux_data, header_size, s->interlaced);
     if (ret)
         return ret;
-    if (s->interlaced) {
-        ret = encode_frame(s, avpkt, frame, aux_data, header_size, 2);
-        if (ret)
-            return ret;
-    }
 
     flush_put_bits(&s->pb);
     avpkt->size = put_bits_count(&s->pb) >> 3;
+
+    s->expected_pos_y += frame->height;
+    if (s->expected_pos_y >= avctx->height)
+        s->expected_pos_y = 0;
 
     *got_packet = 1;
 
@@ -1120,9 +1161,9 @@ static av_cold int vc2_encode_end(AVCodecContext *avctx)
 
 static av_cold int vc2_encode_init(AVCodecContext *avctx)
 {
-    Plane *p;
     SubBand *b;
     int i, j, level, o, shift, ret;
+    int const_quant = 0;
     const AVPixFmtDescriptor *fmt = av_pix_fmt_desc_get(avctx->pix_fmt);
     const int depth = fmt->comp[0].depth;
     VC2EncContext *s = avctx->priv_data;
@@ -1133,7 +1174,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
      * to boost minimal quality the rate control system will set (clips the maximum quantizer) */
     s->q_ceil    = DIRAC_MAX_QUANT_INDEX;
 
-    s->ver.major = 2;
+    s->ver.major = (s->fragment_size) ? 3 : 2;
     s->ver.minor = 0;
     s->profile   = 3;
     s->level     = 3;
@@ -1149,17 +1190,25 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     s->interlaced = !((avctx->field_order == AV_FIELD_UNKNOWN) ||
                       (avctx->field_order == AV_FIELD_PROGRESSIVE));
 
+    int height = avctx->height;
+    AVRational tb = avctx->time_base;
+    if (s->interlaced) {
+        height *= 2;
+        tb.den /= 2;
+    }
+
     for (i = 0; i < base_video_fmts_len; i++) {
         const VC2BaseVideoFormat *fmt = &base_video_fmts[i];
         if (avctx->pix_fmt != fmt->pix_fmt)
             continue;
-        if (avctx->time_base.num != fmt->time_base.num)
+        /* TODO: what to do about field separated pictures and their 2x rate */
+        if (tb.num != fmt->time_base.num)
             continue;
-        if (avctx->time_base.den != fmt->time_base.den)
+        if (tb.den != fmt->time_base.den)
             continue;
         if (avctx->width != fmt->width)
             continue;
-        if (avctx->height != fmt->height)
+        if (height != fmt->height)
             continue;
         if (s->interlaced != fmt->interlaced)
             continue;
@@ -1171,16 +1220,36 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     if (s->interlaced)
         av_log(avctx, AV_LOG_WARNING, "Interlacing enabled!\n");
 
-    if ((s->slice_width  & (s->slice_width  - 1)) ||
-        (s->slice_height & (s->slice_height - 1))) {
-        av_log(avctx, AV_LOG_ERROR, "Slice size is not a power of two!\n");
-        return AVERROR_UNKNOWN;
+    if (avctx->flags & AV_CODEC_FLAG_QSCALE) {
+        const int quant_max = FF_ARRAY_ELEMS(ff_dirac_qscale_tab);
+        const_quant = avctx->global_quality / FF_QP2LAMBDA;
+
+        if (const_quant < 0 || const_quant >= quant_max) {
+            av_log(avctx, AV_LOG_ERROR, "constant quantiser (%d) outside valid range [%d..%d]\n",
+                    const_quant, 0, quant_max);
+            return AVERROR(EINVAL);
+        }
+        av_log(avctx, AV_LOG_WARNING, "encoding with constant quantiser (%d)\n",
+                const_quant);
+        s->const_quant = const_quant;
     }
 
     if ((s->slice_width > avctx->width) ||
         (s->slice_height > avctx->height)) {
         av_log(avctx, AV_LOG_ERROR, "Slice size is bigger than the image!\n");
-        return AVERROR_UNKNOWN;
+        return AVERROR(EINVAL);
+    }
+
+    if ((s->slice_width < (1 << s->wavelet_depth)) ||
+        (s->slice_height < (1 << s->wavelet_depth))) {
+        av_log(avctx, AV_LOG_ERROR, "Slice size is less than wavelet depth\n");
+        return AVERROR(EINVAL);
+    }
+
+    if (avctx->width % s->slice_width || avctx->height % s->slice_height) {
+        av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) not a factor of the frame size (%dx%d)\n",
+                s->slice_width, s->slice_height, avctx->width, avctx->height);
+        return AVERROR(EINVAL);
     }
 
     if (s->base_vf <= 0) {
@@ -1190,7 +1259,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         } else {
             av_log(avctx, AV_LOG_WARNING, "Given format does not strictly comply with "
                    "the specifications, decrease strictness to use it.\n");
-            return AVERROR_UNKNOWN;
+            return AVERROR(EINVAL);
         }
     } else {
         av_log(avctx, AV_LOG_INFO, "Selected base video format = %i (%s)\n",
@@ -1224,21 +1293,49 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
 
     /* Planes initialization */
     for (i = 0; i < 3; i++) {
-        int w, h;
-        p = &s->plane[i];
-        p->width      = avctx->width  >> (i ? s->chroma_x_shift : 0);
-        p->height     = avctx->height >> (i ? s->chroma_y_shift : 0);
-        if (s->interlaced)
-            p->height >>= 1;
-        p->dwt_width  = w = FFALIGN(p->width,  (1 << s->wavelet_depth));
-        p->dwt_height = h = FFALIGN(p->height, (1 << s->wavelet_depth));
-        p->coef_stride = FFALIGN(p->dwt_width, 32);
-        p->coef_buf = av_mallocz(p->coef_stride*p->dwt_height*sizeof(dwtcoef));
+        int chroma_x_shift = i ? s->chroma_x_shift : 0;
+        int chroma_y_shift = i ? s->chroma_y_shift : 0;
+        int w              = avctx->width    >> chroma_x_shift;
+        int h              = avctx->height   >> chroma_y_shift;
+        int slice_w        = s->slice_width  >> chroma_x_shift;
+        int slice_h        = s->slice_height >> chroma_y_shift;
+        int alignment      = 1 << s->wavelet_depth;
+        Plane *p           = &s->plane[i];
+
+        if (slice_w & (alignment-1) || slice_h & (alignment-1)) {
+            av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) for plane %d not a multiple of the wavelet depth (2**%d, %d)\n",
+                    slice_w, slice_h, i, s->wavelet_depth, alignment);
+            return AVERROR(EINVAL);
+        }
+
+        p->width      = w;
+        p->height     = h;
+        w             = FFALIGN(w, alignment);
+        h             = FFALIGN(h, alignment);
+        p->dwt_width  = w; /* TODO: do I need to store these? */
+        p->dwt_height = h;
+        p->slice_w    = slice_w;
+        p->slice_h    = slice_h;
+
+        w             = FFALIGN(w, slice_w);
+        h             = FFALIGN(h, slice_h);
+        p->align_w    = w;
+        p->align_h    = h;
+        p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
+        p->coef_buf = av_mallocz(w*h*sizeof(dwtcoef));
         if (!p->coef_buf)
             goto alloc_fail;
+        /* DWT init */
+        if (ff_vc2enc_init_transforms(&s->transform_args[i].t, w, h, slice_w, slice_h))
+            goto alloc_fail;
+
+        w = p->dwt_width;
+        h = p->dwt_height;
         for (level = s->wavelet_depth-1; level >= 0; level--) {
             w = w >> 1;
             h = h >> 1;
+            slice_w >>= 1;
+            slice_h >>= 1;
             for (o = 0; o < 4; o++) {
                 b = &p->band[level][o];
                 b->width  = w;
@@ -1246,24 +1343,42 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                 b->stride = p->coef_stride;
                 shift = (o > 1)*b->height*b->stride + (o & 1)*b->width;
                 b->buf = p->coef_buf + shift;
+
+                b->left   = (o&1) * slice_w;
+                b->top    = (o>1) * slice_h;
+                b->right  = b->left + slice_w;
+                b->bottom = b->top  + slice_h;
             }
         }
-
-        /* DWT init */
-        if (ff_vc2enc_init_transforms(&s->transform_args[i].t,
-                                      s->plane[i].coef_stride,
-                                      s->plane[i].dwt_height,
-                                      s->slice_width, s->slice_height))
-            goto alloc_fail;
     }
 
     /* Slices */
-    s->num_x = s->plane[0].dwt_width/s->slice_width;
-    s->num_y = s->plane[0].dwt_height/s->slice_height;
+    s->num_x = s->plane[0].align_w/s->slice_width;
+    s->num_y = s->plane[0].align_h/s->slice_height;
+
+    if (s->fragment_size) {
+        if (s->num_x % s->fragment_size) {
+            av_log(avctx, AV_LOG_ERROR, "Fragment size (%d) is not a divisor of the number of slices across the frame (%d)\n",
+                    s->fragment_size, s->num_x);
+            return AVERROR(EINVAL);
+        }
+    }
 
     s->slice_args = av_calloc(s->num_x*s->num_y, sizeof(SliceArgs));
     if (!s->slice_args)
         goto alloc_fail;
+    else {
+        int x, y;
+        for (y = 0; y < s->num_y; y++) {
+            for (x = 0; x < s->num_x; x++) {
+                SliceArgs *args = &s->slice_args[s->num_x * y + x];
+                args->ctx = s;
+                args->x   = x;
+                args->y   = y;
+                args->quant_idx = const_quant;
+            }
+        }
+    }
 
     /* Lookup tables */
     s->coef_lut_len = av_malloc(COEF_LUT_TAB*(s->q_ceil+1)*sizeof(*s->coef_lut_len));
@@ -1295,6 +1410,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
      *     [Coeff 0 for Quant 1, Coeff 1 for Quant 1 ...],
      *     [Coeff 0 for Quant 2, Coeff 1 for Quant 2 ...], }
      */
+    init_quant_matrix(s);
 
     return 0;
 
@@ -1310,15 +1426,14 @@ static const AVOption vc2enc_options[] = {
     {"slice_width",   "Slice width",  offsetof(VC2EncContext, slice_width), AV_OPT_TYPE_INT, {.i64 = 32}, 32, 1024, VC2ENC_FLAGS, "slice_width"},
     {"slice_height",  "Slice height", offsetof(VC2EncContext, slice_height), AV_OPT_TYPE_INT, {.i64 = 16}, 8, 1024, VC2ENC_FLAGS, "slice_height"},
     {"wavelet_depth", "Transform depth", offsetof(VC2EncContext, wavelet_depth), AV_OPT_TYPE_INT, {.i64 = 4}, 1, 5, VC2ENC_FLAGS, "wavelet_depth"},
-    {"wavelet_type",  "Transform type",  offsetof(VC2EncContext, wavelet_idx), AV_OPT_TYPE_INT, {.i64 = VC2_TRANSFORM_9_7}, 0, VC2_TRANSFORMS_NB, VC2ENC_FLAGS, "wavelet_idx"},
-        {"9_7",          "Deslauriers-Dubuc (9,7)", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_TRANSFORM_9_7},    INT_MIN, INT_MAX, VC2ENC_FLAGS, "wavelet_idx"},
-        {"5_3",          "LeGall (5,3)",            0, AV_OPT_TYPE_CONST, {.i64 = VC2_TRANSFORM_5_3},    INT_MIN, INT_MAX, VC2ENC_FLAGS, "wavelet_idx"},
+    {"wavelet_type",  "Transform type",  offsetof(VC2EncContext, wavelet_idx), AV_OPT_TYPE_INT, {.i64 = VC2_TRANSFORM_HAAR_S}, VC2_TRANSFORM_HAAR, VC2_TRANSFORM_HAAR_S, VC2ENC_FLAGS, "wavelet_idx"},
         {"haar",         "Haar (with shift)",       0, AV_OPT_TYPE_CONST, {.i64 = VC2_TRANSFORM_HAAR_S}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "wavelet_idx"},
         {"haar_noshift", "Haar (without shift)",    0, AV_OPT_TYPE_CONST, {.i64 = VC2_TRANSFORM_HAAR},   INT_MIN, INT_MAX, VC2ENC_FLAGS, "wavelet_idx"},
     {"qm", "Custom quantization matrix", offsetof(VC2EncContext, quant_matrix), AV_OPT_TYPE_INT, {.i64 = VC2_QM_DEF}, 0, VC2_QM_NB, VC2ENC_FLAGS, "quant_matrix"},
         {"default",   "Default from the specifications", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_DEF}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"color",     "Prevents low bitrate discoloration", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_COL}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"flat",      "Optimize for PSNR", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_FLAT}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
+    {"fragment_size", "Number of slices to put in each fragment", offsetof(VC2EncContext, fragment_size), AV_OPT_TYPE_INT, {.i64 = 1}, 1, INT_MAX, VC2ENC_FLAGS, "fragment_size"},
     {NULL}
 };
 

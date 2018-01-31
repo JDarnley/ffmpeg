@@ -51,4 +51,6 @@ int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_stride, int p_heigh
                                int slice_w, int slice_h);
 void ff_vc2enc_free_transforms(VC2TransformContext *t);
 
+void ff_vc2enc_init_transforms_x86(VC2TransformContext *s);
+
 #endif /* AVCODEC_VC2ENC_DWT_H */

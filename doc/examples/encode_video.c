@@ -41,10 +41,6 @@ static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt,
 {
     int ret;
 
-    /* send the frame to the encoder */
-    if (frame)
-        printf("Send frame %3"PRId64"\n", frame->pts);
-
     ret = avcodec_send_frame(enc_ctx, frame);
     if (ret < 0) {
         fprintf(stderr, "Error sending a frame for encoding\n");
@@ -75,7 +71,6 @@ int main(int argc, char **argv)
     FILE *f;
     AVFrame *frame;
     AVPacket *pkt;
-    uint8_t endcode[] = { 0, 0, 1, 0xb7 };
 
     if (argc <= 2) {
         fprintf(stderr, "Usage: %s <output file> <codec name>\n", argv[0]);
@@ -104,10 +99,10 @@ int main(int argc, char **argv)
         exit(1);
 
     /* put sample parameters */
-    c->bit_rate = 400000;
+    c->bit_rate = 600*1000*1000;
     /* resolution must be a multiple of two */
-    c->width = 352;
-    c->height = 288;
+    c->width = 1280;
+    c->height = 720;
     /* frames per second */
     c->time_base = (AVRational){1, 25};
     c->framerate = (AVRational){25, 1};
@@ -154,7 +149,7 @@ int main(int argc, char **argv)
     }
 
     /* encode 1 second of video */
-    for (i = 0; i < 25; i++) {
+    for (i = 0; i < 1; i++) {
         fflush(stdout);
 
         /* make sure the frame data is writable */
@@ -164,15 +159,15 @@ int main(int argc, char **argv)
 
         /* prepare a dummy image */
         /* Y */
-        for (y = 0; y < c->height; y++) {
-            for (x = 0; x < c->width; x++) {
+        for (y = 0; y < frame->height; y++) {
+            for (x = 0; x < frame->width; x++) {
                 frame->data[0][y * frame->linesize[0] + x] = x + y + i * 3;
             }
         }
 
         /* Cb and Cr */
-        for (y = 0; y < c->height/2; y++) {
-            for (x = 0; x < c->width/2; x++) {
+        for (y = 0; y < frame->height/2; y++) {
+            for (x = 0; x < frame->width/2; x++) {
                 frame->data[1][y * frame->linesize[1] + x] = 128 + y + i * 2;
                 frame->data[2][y * frame->linesize[2] + x] = 64 + x + i * 5;
             }
@@ -180,17 +175,50 @@ int main(int argc, char **argv)
 
         frame->pts = i;
 
-        /* encode the image */
-        encode(c, frame, pkt, f);
+        for (y = 0; y < frame->height/16; y++) {
+            AVFrame *slice = av_frame_alloc();
+            if (!slice) {
+                fprintf(stderr, "Could not allocate video slice\n");
+                exit(1);
+            }
+            slice->format = c->pix_fmt;
+            slice->width  = frame->width;
+            slice->pts    = frame->pts;
+            slice->height = 16;
+            slice->pos_y  = 16*y;
+
+            ret = av_frame_get_buffer(slice, 32);
+            if (ret < 0) {
+                fprintf(stderr, "Could not allocate the video slice data\n");
+                exit(1);
+            }
+
+            ret = av_frame_make_writable(slice);
+            if (ret < 0) {
+                fprintf(stderr, "Could not make the slice writable\n");
+                exit(1);
+            }
+
+            for (int j = 0; j < 16; j++)
+                memcpy(slice->data[0] + j*slice->linesize[0],
+                       frame->data[0] + (16*y+j)*frame->linesize[0],
+                       slice->width);
+
+            for (int j = 0; j < 8; j++) {
+                memcpy(slice->data[1] + j*slice->linesize[1],
+                       frame->data[1] + (8*y+j)*frame->linesize[1],
+                       slice->width/2);
+                memcpy(slice->data[2] + j*slice->linesize[2],
+                       frame->data[2] + (8*y+j)*frame->linesize[2],
+                       slice->width/2);
+            }
+
+            /* encode the image */
+            encode(c, slice, pkt, f);
+        }
     }
 
-    /* flush the encoder */
-    encode(c, NULL, pkt, f);
-
-    /* add sequence end code to have a real MPEG file */
-    fwrite(endcode, 1, sizeof(endcode), f);
     fclose(f);
-
     avcodec_free_context(&c);
     av_frame_free(&frame);
     av_packet_free(&pkt);
