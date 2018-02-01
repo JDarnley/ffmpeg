@@ -119,6 +119,12 @@ typedef struct DiracContext {
     DiracSlice *slice_params_buf;
     int slice_params_num_buf;
 
+    /* fragments */
+    int is_fragment;
+    int fragment_data_length;
+    int fragment_slice_count;
+    int fragment_slices_received;
+
     /* wavelet decoding */
     unsigned wavelet_depth;     /* depth of the IDWT                         */
     unsigned wavelet_idx;
@@ -137,6 +143,7 @@ typedef struct DiracContext {
     enum AVPixelFormat seq_buf_allocated_fmt;
 
     AVFrame *dummy_frame, *prev_field, *current_picture;
+    AVFrame fragment_picture;
 } DiracContext;
 
 static int alloc_sequence_buffers(DiracContext *s)
@@ -368,7 +375,7 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
     uint8_t *thread_buf = &s->thread_buf[s->thread_buf_size*threadnr];
     /* Loop over all horizontal slices in the row */
     for (i = 0; i < s->num_x; i++)
-        decode_hq_slice(s, &slices[i], thread_buf);
+        decode_hq_slice(s, &slices[i], thread_buf); //TODO: use returned error code
     return 0;
 }
 
@@ -379,15 +386,14 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
 static int decode_lowdelay(DiracContext *s)
 {
     AVCodecContext *avctx = s->avctx;
-    int i, slice_x, slice_y, bufsize, coef_buf_size;
+    int i, slice_x, slice_y, bufsize, coef_buf_size, slice_num = 0, fragment_data_len, x_offset, y_offset, slice;
     int64_t bytes = 0;
     const uint8_t *buf;
     DiracSlice *slices;
     SliceCoeffs tmp[MAX_DWT_LEVELS];
-    int slice_num = 0;
 
     /* Reallocs the slices arguments buffer in case the number of slices change */
-    if (s->slice_params_num_buf != (s->num_x * s->num_y)) {
+    if (s->fragment_slices_received == 0 && s->slice_params_num_buf != (s->num_x * s->num_y)) {
         s->slice_params_buf = av_realloc_f(s->slice_params_buf, s->num_x * s->num_y, sizeof(DiracSlice));
         if (!s->slice_params_buf) {
             av_log(s->avctx, AV_LOG_ERROR, "slice params buffer allocation failure\n");
@@ -399,13 +405,13 @@ static int decode_lowdelay(DiracContext *s)
     slices = s->slice_params_buf;
 
     /* Reallocs the thread buffer - the temporary storage for slice coefficients
-     * for a single thread if the number of threads changes during runtime
-     * which can definitely happen.
-     * This is the maximum amount of coefficients in a slice in an entire frame
-     * NB: number of coefficients in a slice in a frame is NOT constant and will
-     * change depending on where the slice is, hence this is the maximum.
-     * 8 becacuse that's how much the golomb reader could overread junk data
-     * from another plane/slice at most, and 512 because SIMD */
+    * for a single thread if the number of threads changes during runtime
+    * which can definitely happen.
+    * This is the maximum amount of coefficients in a slice in an entire frame
+    * NB: number of coefficients in a slice in a frame is NOT constant and will
+    * change depending on where the slice is, hence this is the maximum.
+    * 8 becacuse that's how much the golomb reader could overread junk data
+    * from another plane/slice at most, and 512 because SIMD */
     coef_buf_size = subband_coeffs(s, s->num_x - 1, s->num_y - 1, 0, tmp) + 8;
     coef_buf_size = (coef_buf_size << (1 + s->pshift)) + 512;
 
@@ -421,45 +427,100 @@ static int decode_lowdelay(DiracContext *s)
     }
 
     align_get_bits(&s->gb);
-    /*[DIRAC_STD] 13.5.2 Slices. slice(sx,sy) */
     buf = s->gb.buffer + get_bits_count(&s->gb)/8;
     bufsize = get_bits_left(&s->gb);
 
-    for (slice_y = 0; bufsize > 0 && slice_y < s->num_y; slice_y++) {
-        for (slice_x = 0; bufsize > 0 && slice_x < s->num_x; slice_x++) {
+    if (s->is_fragment) {
+        fragment_data_len = get_bits_long(&s->gb, 16);
+        if (fragment_data_len > bufsize) {
+            av_log(s->avctx, AV_LOG_ERROR, "invalid fragment data length \n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        slice_num = get_bits_long(&s->gb, 16);
+        if (!slice_num || s->fragment_slices_received + slice_num > s->num_x*s->num_y) {
+            av_log(s->avctx, AV_LOG_ERROR, "invalid number of slices\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        x_offset = get_bits_long(&s->gb, 16);
+        y_offset = get_bits_long(&s->gb, 16);
+
+        if (x_offset >= s->num_x || y_offset >= s->num_y) {
+            av_log(s->avctx, AV_LOG_ERROR, "fragment slice offset (%d,%d) is invalid for slice dimensions (%dx%d)\n",
+                    x_offset, y_offset, s->num_x, s->num_y);
+            return AVERROR_INVALIDDATA;
+        }
+
+        /* byte_align and update buffer position before fragment_data */
+        align_get_bits(&s->gb);
+        buf = s->gb.buffer + get_bits_count(&s->gb)/8;
+        bufsize = get_bits_left(&s->gb);
+
+        for (slice = 0; slice < slice_num; slice++) {
             bytes = s->prefix_bytes + 1;
             for (i = 0; i < 3; i++) {
                 if (bytes <= bufsize/8)
                     bytes += buf[bytes] * s->size_scaler + 1;
             }
             if (bytes >= INT_MAX || bytes*8 > bufsize) {
-                av_log(s->avctx, AV_LOG_ERROR, "too many bytes\n");
+                av_log(s->avctx, AV_LOG_ERROR, "too many bytes\n"); //TODO: improve message
                 return AVERROR_INVALIDDATA;
             }
 
-            slices[slice_num].bytes   = bytes;
-            slices[slice_num].slice_x = slice_x;
-            slices[slice_num].slice_y = slice_y;
+            slices[slice].bytes   = bytes;
+            slices[slice].slice_x = (y_offset*s->num_x + x_offset + slice) % s->num_x;
+            slices[slice].slice_y = (y_offset*s->num_x + x_offset + slice) / s->num_x;
             /* Sets all the arguments and get bit contexts to the right addresses */
-            init_get_bits(&slices[slice_num].gb, buf, bufsize);
-            slice_num++;
+            init_get_bits(&slices[slice].gb, buf, bufsize);
 
             buf += bytes;
             if (bufsize/8 >= bytes)
                 bufsize -= bytes*8;
             else
                 bufsize = 0;
+
+            decode_hq_slice(s, &slices[slice], s->thread_buf); //TODO: use returned error code
         }
-    }
+        s->fragment_slices_received += slice_num;
+    } else {
+        /*[DIRAC_STD] 13.5.2 Slices. slice(sx,sy) */
+        for (slice_y = 0; bufsize > 0 && slice_y < s->num_y; slice_y++) {
+            for (slice_x = 0; bufsize > 0 && slice_x < s->num_x; slice_x++) {
+                bytes = s->prefix_bytes + 1;
+                for (i = 0; i < 3; i++) {
+                    if (bytes <= bufsize/8)
+                        bytes += buf[bytes] * s->size_scaler + 1;
+                }
+                if (bytes >= INT_MAX || bytes*8 > bufsize) {
+                    av_log(s->avctx, AV_LOG_ERROR, "too many bytes\n");
+                    return AVERROR_INVALIDDATA;
+                }
 
-    /* Very likely to detect overflows */
-    if (s->num_x*s->num_y != slice_num) {
-        av_log(s->avctx, AV_LOG_ERROR, "too few slices\n");
-        return AVERROR_INVALIDDATA;
-    }
+                slices[slice_num].bytes   = bytes;
+                slices[slice_num].slice_x = slice_x;
+                slices[slice_num].slice_y = slice_y;
+                /* Sets all the arguments and get bit contexts to the right addresses */
+                init_get_bits(&slices[slice_num].gb, buf, bufsize);
+                slice_num++;
 
-    /* Runs decode_hq_slice_row to decode the slices in a row per thread */
-    avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, s->num_y);
+                buf += bytes;
+                if (bufsize/8 >= bytes)
+                    bufsize -= bytes*8;
+                else
+                    bufsize = 0;
+            }
+        }
+
+        /* Very likely to detect overflows */
+        if (s->num_x*s->num_y != slice_num) {
+            av_log(s->avctx, AV_LOG_ERROR, "too few slices\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        /* Runs decode_hq_slice_row to decode the slices in a row per thread */
+        avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, s->num_y);
+    }
 
     return 0;
 }
@@ -510,7 +571,7 @@ static int dirac_unpack_idwt_params(DiracContext *s)
 {
     GetBitContext *gb = &s->gb;
     int i, level;
-    int tmp;
+    int tmp, asym_transform_index_flag, asym_transform_flag;
 
 #define CHECKEDREAD(dst, cond, errmsg) \
     tmp = get_interleaved_ue_golomb(gb); \
@@ -526,6 +587,19 @@ static int dirac_unpack_idwt_params(DiracContext *s)
     CHECKEDREAD(s->wavelet_idx, tmp > 6, "wavelet_idx is too big\n")
 
     CHECKEDREAD(s->wavelet_depth, tmp > MAX_DWT_LEVELS || tmp < 1, "invalid number of DWT decompositions\n")
+
+    if (s->version.major >= 3) {
+        asym_transform_index_flag = get_bits1(gb);
+        if (asym_transform_index_flag)
+            get_interleaved_ue_golomb(gb);
+        
+        asym_transform_flag = get_bits1(gb);
+        if (asym_transform_flag)
+            get_interleaved_ue_golomb(gb);
+        
+        if (asym_transform_index_flag || asym_transform_flag)
+            avpriv_request_sample(s->avctx, "Asymmetric transform");
+    }
 
     /* Min slice size is 8 pixels, so it's a sane limit */
     CHECKEDREAD(s->num_x, (tmp <= 0 || (tmp > (s->avctx->width /8))), "Invalid number of horizontal slices\n");
@@ -611,9 +685,11 @@ static int dirac_decode_frame_internal(DiracContext *s)
     if ((ret = decode_lowdelay(s)) < 0)
         return ret;
 
-    /* Does the iDWT on the 3 planes in parallel, not in git master since
-     * the MC depends on doing it serially */
-    s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
+    if (!s->is_fragment) {
+        /* Does the iDWT on the 3 planes in parallel, not in git master since
+        * the MC depends on doing it serially */
+        s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
+    }
 
     return 0;
 }
@@ -662,13 +738,14 @@ static int dirac_decode_picture_header(DiracContext *s)
 
 /* [DIRAC_STD] dirac_decode_data_unit makes reference to the while defined in 9.3
    inside the function parse_sequence() */
-static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *frame,
+static int dirac_decode_data_unit(AVCodecContext *avctx,
                                   const uint8_t *buf, int size)
 {
-    int ret;
+    int ret, get_bits_read = 0;
     AVFrame *pic;
     uint32_t pict_num;
     uint8_t parse_code;
+    int num_slices = -1;
     AVDiracSeqHeader *dsh;
     DiracContext *s = avctx->priv_data;
 
@@ -694,6 +771,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *frame,
             av_log(avctx, AV_LOG_ERROR, "error parsing sequence header");
             return ret;
         }
+        get_bits_read = ret;
 
         if (CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS) * CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS) > avctx->max_pixels)
             ret = AVERROR(ERANGE);
@@ -736,6 +814,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *frame,
         s->seq                 = *dsh;
         av_freep(&dsh);
 
+        s->is_fragment = 0;
+        s->fragment_slice_count = 0;
+        s->fragment_slices_received = 0;
+
         s->pshift = s->bit_depth > 8;
 
         ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt,
@@ -761,9 +843,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *frame,
         s->seen_sequence_header = 1;
     } else if (parse_code == DIRAC_PCODE_END_SEQ) { /* [DIRAC_STD] End of Sequence */
         s->seen_sequence_header = 0;
+        get_bits_read = DATA_UNIT_HEADER_SIZE * 8;
     } else if (parse_code == DIRAC_PCODE_AUX) {
         ; /* Usually contains encoder information */
-    } else if (parse_code & 0x8) {  /* picture data unit */
+    } else if ((parse_code & 0x88) == 0x88) {  /* picture data unit */
         if (!s->seen_sequence_header) {
             av_log(avctx, AV_LOG_DEBUG, "Dropping frame without sequence header\n");
             return AVERROR_INVALIDDATA;
@@ -775,73 +858,110 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *frame,
             return AVERROR_INVALIDDATA;
         }
 
-        pic = !s->field_coding ? frame : s->dummy_frame;
+        s->is_fragment = (parse_code & 0x0C) == 0x0C;
+
+        pic = s->dummy_frame; // TODO: use something else when doing interlaced.
         pic->key_frame = 1;
         pic->pict_type = AV_PICTURE_TYPE_I;
 
-        /* [DIRAC_STD] 11.1.1 Picture Header. picture_header() */
+        align_get_bits(&s->gb);
+
+        /* [DIRAC_STD] 11.1.1 Picture Header. picture_header(), also 14.2 for fragment */
         pict_num = get_bits_long(&s->gb, 32);
         av_log(s->avctx, AV_LOG_DEBUG, "Picture number: %d\n", pict_num);
 
-        if (!s->field_coding) {
-            if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
-                return ret;
-            pic->display_picture_number = pict_num;
-            s->current_picture = pic;
-            s->plane[0].stride = pic->linesize[0];
-            s->plane[1].stride = pic->linesize[1];
-            s->plane[2].stride = pic->linesize[2];
-            s->cur_field = 0;
-        } else {
-            /* Picks the field number based on the parity of the picture number */
-            s->cur_field = pict_num & 1;
+        /* Read the fragment header of the first fragment */
+        if (s->is_fragment) {
+            unsigned temp = show_bits_long(&s->gb, 32);
+            s->fragment_data_length = temp >> 16;
+            num_slices = s->fragment_slice_count = temp & 0xFFFF;
 
-            if (!s->cur_field) {
-                av_frame_unref(s->prev_field);
-                if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
+            //s->fragment_data_length = get_bits_long(&s->gb, 16); /* fragment_data_length */
+            //s->fragment_slice_count = get_bits_long(&s->gb, 16);
+            /* TODO: maybe read x and y offset here */
+        }
+
+        if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
+            if (!s->field_coding) {
+                if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
                     return ret;
-                s->prev_field = pic;
+                pic->display_picture_number = pict_num;
+                s->current_picture = pic;
                 s->plane[0].stride = pic->linesize[0];
                 s->plane[1].stride = pic->linesize[1];
                 s->plane[2].stride = pic->linesize[2];
+                s->cur_field = 0;
             } else {
-                if (!s->current_picture || !s->prev_field)
-                    return AVERROR_INVALIDDATA;
-                /* Check and reject second field having different dimensions */
-                if ((avctx->width  != s->current_picture->width ) ||
-                    (avctx->height != s->current_picture->height)) {
-                    av_log(avctx, AV_LOG_ERROR, "Second field has different width/height!\n");
-                    return AVERROR_INVALIDDATA;
-                }
-                s->plane[0].stride = s->current_picture->linesize[0];
-                s->plane[1].stride = s->current_picture->linesize[1];
-                s->plane[2].stride = s->current_picture->linesize[2];
-            }
+                /* Picks the field number based on the parity of the picture number */
+                s->cur_field = pict_num & 1;
 
-            s->prev_field->display_picture_number = pict_num;
-            s->current_picture = s->prev_field;
+                if (!s->cur_field) {
+                    av_frame_unref(s->prev_field);
+                    if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
+                        return ret;
+                    s->prev_field = pic;
+                    s->plane[0].stride = pic->linesize[0];
+                    s->plane[1].stride = pic->linesize[1];
+                    s->plane[2].stride = pic->linesize[2];
+                } else {
+                    if (!s->current_picture || !s->prev_field)
+                        return AVERROR_INVALIDDATA;
+                    /* Check and reject second field having different dimensions */
+                    if ((avctx->width  != s->current_picture->width ) ||
+                        (avctx->height != s->current_picture->height)) {
+                        av_log(avctx, AV_LOG_ERROR, "Second field has different width/height!\n");
+                        return AVERROR_INVALIDDATA;
+                    }
+                    s->plane[0].stride = s->current_picture->linesize[0];
+                    s->plane[1].stride = s->current_picture->linesize[1];
+                    s->plane[2].stride = s->current_picture->linesize[2];
+                }
+
+                s->prev_field->display_picture_number = pict_num;
+                s->current_picture = s->prev_field;
+            }
         }
 
-        /* [DIRAC_STD] 11.1 Picture parse. picture_parse() */
-        if ((ret = dirac_decode_picture_header(s)))
-            return ret;
+        if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
+            /* because we didn't _read_ the fragment_data_length and
+             * fragment_slice_count above we need to skip those 32-bits here. */
+            if (s->is_fragment)
+                skip_bits(&s->gb, 32);
 
-        /* Will warn if the encoder's not fast enough or the decoder's not fast
-         * enough or if a frame wasn't able to be decoded and was dropped */
-        if (s->current_picture->display_picture_number &&
-            s->current_picture->display_picture_number != s->prev_pict_number + 1)
-            av_log(s->avctx, AV_LOG_WARNING,
-                   "Picture number is not linearly incrementing, %i -> %i\n",
-                   s->prev_pict_number, s->current_picture->display_picture_number);
+            /* [DIRAC_STD] 11.1 Picture parse. picture_parse() */
+            if ((ret = dirac_decode_picture_header(s))) {
+                return ret;
+            }
 
-        s->prev_pict_number = s->current_picture->display_picture_number;
+            /* Spec 14.3 part of initialize_fragment_state */
+            s->fragment_slices_received = 0;
+        }
+
+        if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
+            /* Will warn if the encoder's not fast enough or the decoder's not fast
+            * enough or if a frame wasn't able to be decoded and was dropped */
+            if (s->current_picture->display_picture_number &&
+                s->current_picture->display_picture_number != s->prev_pict_number + 1)
+                av_log(s->avctx, AV_LOG_WARNING,
+                    "Picture number is not linearly incrementing, %i -> %i\n",
+                    s->prev_pict_number, s->current_picture->display_picture_number);
+
+            s->prev_pict_number = s->current_picture->display_picture_number;
+        }
+
+        if (s->is_fragment && !num_slices)
+            return get_bits_count(&s->gb);
 
         /* [DIRAC_STD] 13.0 Transform data syntax. transform_data() */
         ret = dirac_decode_frame_internal(s);
         if (ret < 0)
             return ret;
+        get_bits_read = get_bits_count(&s->gb);
+    } else {
+        av_log(s->avctx, AV_LOG_WARNING, "unknown Parse Code (0x%x), continuing\n", parse_code);
     }
-    return 0;
+
+    return get_bits_read;
 }
 
 static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *pkt)
@@ -852,6 +972,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     int buf_idx         = 0;
     int ret, picture_element_present = 0;
     unsigned data_unit_size;
+    AVFrame *f = data;
 
     *got_frame = 0;
 
@@ -878,8 +999,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             break;
 
         data_unit_size = AV_RB32(buf+buf_idx+5);
-        if (data_unit_size > buf_size - buf_idx || !data_unit_size) {
-            if(data_unit_size > buf_size - buf_idx)
+        if (data_unit_size > buf_size - buf_idx) {
             av_log(s->avctx, AV_LOG_ERROR,
                    "Data unit with size %d is larger than input buffer, discarding\n",
                    data_unit_size);
@@ -887,13 +1007,27 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             continue;
         }
         /* [DIRAC_STD] dirac_decode_data_unit makes reference to the while defined in 9.3 inside the function parse_sequence() */
-        ret = dirac_decode_data_unit(avctx, data, buf+buf_idx, data_unit_size);
+        if (data_unit_size)
+            ret = dirac_decode_data_unit(avctx, buf+buf_idx, data_unit_size);
+        else
+            ret = dirac_decode_data_unit(avctx, buf+buf_idx, buf_size - buf_idx);
         if (ret < 0) {
             av_log(s->avctx, AV_LOG_ERROR, "Error in dirac_decode_data_unit\n");
             return ret;
         }
-        picture_element_present |= *(buf + buf_idx + 4) & 0x8;
-        buf_idx += data_unit_size;
+
+        if (s->is_fragment) {
+            picture_element_present = s->fragment_slices_received == (s->num_x * s->num_y);
+        } else {
+            uint8_t parse_code = *(buf + buf_idx + 4);
+            picture_element_present |= parse_code == DIRAC_PCODE_PICTURE_HQ
+                || parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ;
+        }
+
+        if (data_unit_size)
+            buf_idx += data_unit_size;
+        else
+            buf_idx += ret + 7 >> 3;
     }
 
     /* ref the top field's frame during field coded interlacing */
@@ -904,12 +1038,23 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             return ret;
     }
 
-    /* Return a frame only if there was a valid picture in the packet */
-    *got_frame = picture_element_present;
-
     /* No output for the top field, wait for the second */
     if (s->field_coding && !s->cur_field)
+        picture_element_present = 0;
+
+    /* Return a frame only if there was a valid picture in the packet */
+    if (picture_element_present) {
+        if (s->is_fragment)
+            s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
+
+        *got_frame = 1;
+        // TODO: do something with frame
+        //ret = av_frame_ref(data, s->current_picture);
+        av_frame_move_ref(data, s->current_picture);
+    } else {
         *got_frame = 0;
+    }
+
 
     /* Total bytes read */
     return buf_idx;
