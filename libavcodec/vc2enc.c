@@ -92,6 +92,7 @@ typedef struct SubBand {
     ptrdiff_t stride;
     int width;
     int height;
+    int hstride;
 } SubBand;
 
 typedef struct Plane {
@@ -561,7 +562,7 @@ static void encode_picture_start(VC2EncContext *s)
 
 /* VC-2 13.5.5.2 - slice_band() */
 static void encode_subband(VC2EncContext *s, PutBitContext *pb, int sx, int sy,
-                           SubBand *b, int quant)
+                           SubBand *b, int quant, const ptrdiff_t hstride)
 {
     int x, y;
 
@@ -578,8 +579,8 @@ static void encode_subband(VC2EncContext *s, PutBitContext *pb, int sx, int sy,
 
     for (y = top; y < bottom; y++) {
         for (x = left; x < right; x++) {
-            const int neg = coeff[x] < 0;
-            uint32_t c_abs = FFABS(coeff[x]);
+            const int neg = coeff[x * hstride] < 0;
+            uint32_t c_abs = FFABS(coeff[x * hstride]);
             if (c_abs < COEF_LUT_TAB) {
                 put_bits(pb, len_lut[c_abs], val_lut[c_abs] | neg);
             } else {
@@ -631,7 +632,7 @@ static int count_hq_slice(SliceArgs *slice, int quant_idx)
 
                 for (y = top; y < bottom; y++) {
                     for (x = left; x < right; x++) {
-                        uint32_t c_abs = FFABS(buf[x]);
+                        uint32_t c_abs = FFABS(buf[x * b->hstride]);
                         if (c_abs < COEF_LUT_TAB) {
                             bits += len_lut[c_abs];
                         } else {
@@ -797,7 +798,7 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
             for (orientation = !!level; orientation < 4; orientation++) {
                 SubBand *b = &s->plane[p].band[level][orientation];
                 encode_subband(s, pb, slice_x, slice_y, b,
-                               quants[level][orientation]);
+                               quants[level][orientation], b->hstride);
             }
         }
         avpriv_align_put_bits(pb);
@@ -932,8 +933,8 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
 
     for (level = s->wavelet_depth-1; level >= 0; level--) {
         const SubBand *b = &p->band[level][0];
-        t->vc2_subband_dwt[idx](t, p->coef_buf, p->coef_stride,
-                                b->width, b->height);
+        t->vc2_subband_dwt[idx](t, p->coef_buf, b->stride >> 1,
+                                b->width, b->height, b->hstride >> 1);
     }
 
     return 0;
@@ -1168,7 +1169,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
 
     /* Planes initialization */
     for (i = 0; i < 3; i++) {
-        int w, h;
+        int w, h, hstride = 1;
         Plane *p = &s->plane[i];
         p->width      = avctx->width  >> (i ? s->chroma_x_shift : 0);
         p->height     = avctx->height >> (i ? s->chroma_y_shift : 0);
@@ -1183,12 +1184,14 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         for (level = s->wavelet_depth-1; level >= 0; level--) {
             w = w >> 1;
             h = h >> 1;
+            hstride = hstride << 1;
             for (o = 0; o < 4; o++) {
                 SubBand *b = &p->band[level][o];
                 b->width  = w;
                 b->height = h;
-                b->stride = p->coef_stride;
-                shift = (o > 1)*b->height*b->stride + (o & 1)*b->width;
+                b->hstride = hstride;
+                b->stride = p->coef_stride * hstride;
+                shift = (o > 1)*(b->stride >> 1) + (o & 1)*(hstride >> 1);
                 b->buf = p->coef_buf + shift;
             }
         }
