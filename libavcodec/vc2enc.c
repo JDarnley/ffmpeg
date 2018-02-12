@@ -450,7 +450,7 @@ static void encode_seq_header(VC2EncContext *s)
 static void encode_picture_header(VC2EncContext *s)
 {
     avpriv_align_put_bits(&s->pb);
-    put_bits32(&s->pb, s->picture_number++);
+    put_bits32(&s->pb, s->picture_number);
 }
 
 /* VC-2 12.3.4.1 - slice_parameters() */
@@ -1138,6 +1138,8 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         /* End sequence */
         encode_parse_info(s, DIRAC_PCODE_END_SEQ);
     }
+
+    s->picture_number++;
 
     return 0;
 }
