@@ -322,7 +322,7 @@ static void encode_frame_size(VC2EncContext *s)
         AVCodecContext *avctx = s->avctx;
         put_vc2_ue_uint(&s->pb, avctx->width);
         if (s->interlaced)
-            put_vc2_ue_uint(&s->pb, 2*avctx->height);
+            put_vc2_ue_uint(&s->pb, avctx->height);
         else
             put_vc2_ue_uint(&s->pb, avctx->height);
     }
@@ -360,9 +360,9 @@ static void encode_frame_rate(VC2EncContext *s)
         AVCodecContext *avctx = s->avctx;
         put_vc2_ue_uint(&s->pb, 0);
         if (s->interlaced)
-            put_vc2_ue_uint(&s->pb, avctx->time_base.den/2);
-        else
             put_vc2_ue_uint(&s->pb, avctx->time_base.den);
+        else
+           put_vc2_ue_uint(&s->pb, avctx->time_base.den);
         put_vc2_ue_uint(&s->pb, avctx->time_base.num);
     }
 }
@@ -1147,14 +1147,13 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     s->slice_min_bytes = 0;
 
     /* Mark unknown as progressive */
-    s->interlaced = !((avctx->field_order == AV_FIELD_UNKNOWN) ||
-                      (avctx->field_order == AV_FIELD_PROGRESSIVE));
+    s->interlaced = 0;
 
     int height = avctx->height;
     AVRational tb = avctx->time_base;
     if (s->interlaced) {
         height *= 2;
-        tb.den /= 2
+        tb.den /= 2;
     }
 
     for (i = 0; i < base_video_fmts_len; i++) {
