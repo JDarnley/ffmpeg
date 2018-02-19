@@ -2225,9 +2225,15 @@ int attribute_align_arg avcodec_decode_video2(AVCodecContext *avctx, AVFrame *pi
         if (HAVE_THREADS && avctx->active_thread_type & FF_THREAD_FRAME)
             ret = ff_thread_decode_frame(avctx, picture, got_picture_ptr,
                                          &tmp);
+            if (ret < 0) {
+                printf("ff thread gave %d\n", ret);
+            }
         else {
             ret = avctx->codec->decode(avctx, picture, got_picture_ptr,
                                        &tmp);
+            if (ret < 0) {
+                printf("decode gave %d\n", ret);
+            }
             if (!(avctx->codec->caps_internal & FF_CODEC_CAP_SETS_PKT_DTS))
                 picture->pkt_dts = avpkt->dts;
 

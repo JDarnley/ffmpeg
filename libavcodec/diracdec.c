@@ -671,7 +671,10 @@ static int dirac_decode_frame_internal(DiracContext *s)
 
     /* Does the actual coefficient decoding */
     if ((ret = decode_lowdelay(s)) < 0)
+    {
+	printf("\n decode_lowdelay fail \n");
         return ret;
+    }
 
     if (!s->is_fragment) {
         /* Does the iDWT on the 3 planes in parallel, not in git master since
@@ -739,7 +742,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
     /* Must be corruption since the packet isn't large enough to fill a header */
     if (size < DATA_UNIT_HEADER_SIZE)
+    {
+        printf("\n FUCK3 \n");
         return AVERROR_INVALIDDATA;
+    }
 
     /* Get the parse code identifier */
     parse_code = buf[4];
@@ -750,6 +756,8 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
     /* Sequence header - not actually always required, some encoders may put
      * one sequence header every lots of frames */
     if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
+        printf(" seqhr %i \n", parse_code);
+
         if (s->seen_sequence_header)
             return 0;
 
@@ -867,29 +875,39 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
         if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
             if (!s->field_coding) {
-                if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
+                if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)  {
+                    av_log(s->avctx, AV_LOG_ERROR, "error getting buf\n");
                     return ret;
+                }
                 pic->display_picture_number = pict_num;
                 s->current_picture = pic;
                 s->plane[0].stride = pic->linesize[0];
                 s->plane[1].stride = pic->linesize[1];
                 s->plane[2].stride = pic->linesize[2];
                 s->cur_field = 0;
+                printf("allocated progressive picture\n");
             } else {
                 /* Picks the field number based on the parity of the picture number */
                 s->cur_field = pict_num & 1;
 
                 if (!s->cur_field) {
                     av_frame_unref(s->prev_field);
-                    if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
+
+                    if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0) {
+                        av_log(s->avctx, AV_LOG_ERROR, "error getting buf\n");
                         return ret;
+                    }
+                    printf("allocated interlaced picture\n");
                     s->prev_field = pic;
                     s->plane[0].stride = pic->linesize[0];
                     s->plane[1].stride = pic->linesize[1];
                     s->plane[2].stride = pic->linesize[2];
                 } else {
                     if (!s->current_picture || !s->prev_field)
+                    {
+			printf("FUCK2 \n");
                         return AVERROR_INVALIDDATA;
+                    }
                     /* Check and reject second field having different dimensions */
                     if ((avctx->width  != s->current_picture->width ) ||
                         (avctx->height != s->current_picture->height)) {
@@ -903,6 +921,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
                 s->prev_field->display_picture_number = pict_num;
                 s->current_picture = s->prev_field;
+                printf("current picture set %p \n", s->current_picture );
             }
         }
 
@@ -938,8 +957,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
         /* [DIRAC_STD] 13.0 Transform data syntax. transform_data() */
         ret = dirac_decode_frame_internal(s);
-        if (ret < 0)
+        if (ret < 0) {
+            printf("FRAME INTERNAL GAVE %d\n", ret);
             return ret;
+        }
         get_bits_read = get_bits_count(&s->gb);
     } else {
         av_log(s->avctx, AV_LOG_WARNING, "unknown Parse Code (0x%x), continuing\n", parse_code);
@@ -996,17 +1017,11 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         else
             ret = dirac_decode_data_unit(avctx, f, buf+buf_idx, buf_size - buf_idx);
         if (ret < 0) {
-            av_log(avctx, AV_LOG_ERROR, "Error in dirac_decode_data_unit\n");
+            av_log(avctx, AV_LOG_ERROR, "Error in dirac_decode_data_unit : %d\n", ret);
             return ret;
         }
 
-        if (s->is_fragment) {
-            picture_element_present = s->fragment_slices_received == (s->num_x * s->num_y);
-        } else {
-            uint8_t parse_code = *(buf + buf_idx + 4);
-            picture_element_present |= parse_code == DIRAC_PCODE_PICTURE_HQ
-                || parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HIGH_QUALITY;
-        }
+        picture_element_present = (s->num_x && s->num_y) && (s->fragment_slices_received == (s->num_x * s->num_y));
 
         if (data_unit_size)
             buf_idx += data_unit_size;
@@ -1016,10 +1031,11 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
     /* ref the top field's frame during field coded interlacing */
     if (s->field_coding) {
-        if (!s->current_picture)
-            return AVERROR_INVALIDDATA;
-        else if ((ret=av_frame_ref(data, s->current_picture)) < 0)
-            return ret;
+        if (s->current_picture)
+        {
+            if ((ret=av_frame_ref(data, s->current_picture)) < 0)
+                return ret;
+        }
     }
 
     /* No output for the top field, wait for the second */
@@ -1027,13 +1043,15 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         picture_element_present = 0;
 
     /* Return a frame only if there was a valid picture in the packet */
-    if (picture_element_present) {
+    if (picture_element_present && s->current_picture) {
         if (s->is_fragment) {
             avctx->execute2(avctx, idwt_plane, NULL, NULL, 3);
             av_frame_move_ref(data, s->cached_picture);
         }
 
         *got_frame = 1;
+        s->current_picture = NULL;
+        s->prev_field = NULL;
     } else {
         *got_frame = 0;
     }
