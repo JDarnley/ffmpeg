@@ -579,8 +579,7 @@ static void encode_fragment_header(VC2EncContext *s, int slice_count, int x_offs
     if (slice_count) {
         put_bits(&s->pb, 16, x_offset);
         put_bits(&s->pb, 16, y_offset);
-    } else
-        s->picture_number++;
+    }
 }
 
 /* Quantize a single unsigned coefficient - left shift on signed is undefined,
@@ -1063,6 +1062,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     /* End sequence */
     if (frame->pos_y == s->avctx->height - s->plane[0].slice_h) {
         encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
+        s->picture_number++;
     }
 
     return 0;
