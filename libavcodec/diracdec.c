@@ -438,7 +438,8 @@ static int decode_lowdelay(DiracContext *s)
 
         slice_num = get_bits_long(&s->gb, 16);
         if (!slice_num || s->fragment_slices_received + slice_num > s->num_x*s->num_y) {
-            av_log(s->avctx, AV_LOG_ERROR, "invalid number of slices (%d)\n", slice_num);
+            av_log(s->avctx, AV_LOG_ERROR, "invalid number of slices (%d || %d + %d > %d*%d)\n",
+                    slice_num, s->fragment_slices_received, slice_num, s->num_x, s->num_y);
             return AVERROR_INVALIDDATA;
         }
 
@@ -463,7 +464,9 @@ static int decode_lowdelay(DiracContext *s)
                     bytes += buf[bytes] * s->size_scaler + 1;
             }
             if (bytes >= INT_MAX || bytes*8 > bufsize) {
-                av_log(s->avctx, AV_LOG_ERROR, "too many bytes\n"); //TODO: improve message
+                /* TODO: improve message */
+                av_log(s->avctx, AV_LOG_ERROR, "too many bytes (%"PRId64" > %"PRId64" || %"PRId64" > %"PRId64"), size_scaler: %d\n",
+                        bytes, (int64_t)INT_MAX, bytes*8, (int64_t)bufsize, s->size_scaler);
                 return AVERROR_INVALIDDATA;
             }
 
@@ -681,8 +684,10 @@ static int dirac_decode_frame_internal(DiracContext *s)
     int ret;
 
     /* Does the actual coefficient decoding */
-    if ((ret = decode_lowdelay(s)) < 0)
+    if ((ret = decode_lowdelay(s)) < 0) {
+        av_log(s->avctx, AV_LOG_ERROR, "error in decode_lowdelay\n");
         return ret;
+    }
 
     if (!s->is_fragment) {
         /* Does the iDWT on the 3 planes in parallel, not in git master since
@@ -749,8 +754,11 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
     DiracContext *s = avctx->priv_data;
 
     /* Must be corruption since the packet isn't large enough to fill a header */
-    if (size < DATA_UNIT_HEADER_SIZE)
+    if (size < DATA_UNIT_HEADER_SIZE) {
+        av_log(avctx, AV_LOG_ERROR, "data unit too small for header (%d < %d)\n",
+                size, DATA_UNIT_HEADER_SIZE);
         return AVERROR_INVALIDDATA;
+    }
 
     /* Get the parse code identifier */
     parse_code = buf[4];
@@ -885,8 +893,11 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
         if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
             if (!s->field_coding) {
-                if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
+                if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0) {
+                    av_log(s->avctx, AV_LOG_ERROR, "error getting progressive buf\n");
                     return ret;
+                }
+                av_log(avctx, AV_LOG_INFO, "allocated progressive buf\n");
                 pic->display_picture_number = pict_num;
                 s->current_picture = pic;
                 s->plane[0].stride = pic->linesize[0];
@@ -899,15 +910,20 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
                 if (!s->cur_field) {
                     av_frame_unref(s->prev_field);
-                    if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
+                    if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0) {
+                        av_log(s->avctx, AV_LOG_ERROR, "error getting interlaced buf\n");
                         return ret;
+                    }
+                    av_log(avctx, AV_LOG_INFO, "allocated interlaced buf\n");
                     s->prev_field = pic;
                     s->plane[0].stride = pic->linesize[0];
                     s->plane[1].stride = pic->linesize[1];
                     s->plane[2].stride = pic->linesize[2];
                 } else {
-                    if (!s->current_picture || !s->prev_field)
+                    if (!s->current_picture || !s->prev_field) {
+                        av_log(avctx, AV_LOG_ERROR, "no current pic or not second field\n");
                         return AVERROR_INVALIDDATA;
+                    }
                     /* Check and reject second field having different dimensions */
                     if ((avctx->width  != s->current_picture->width ) ||
                         (avctx->height != s->current_picture->height)) {
@@ -956,8 +972,11 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
         /* [DIRAC_STD] 13.0 Transform data syntax. transform_data() */
         ret = dirac_decode_frame_internal(s);
-        if (ret < 0)
+        if (ret < 0) {
+            av_log(avctx, AV_LOG_ERROR, "dirac_decode_frame_internal returned %d\n",
+                    ret);
             return ret;
+        }
         get_bits_read = get_bits_count(&s->gb);
     } else {
         av_log(s->avctx, AV_LOG_WARNING, "unknown Parse Code (0x%x), continuing\n", parse_code);
@@ -1014,7 +1033,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         else
             ret = dirac_decode_data_unit(avctx, f, buf+buf_idx, buf_size - buf_idx);
         if (ret < 0) {
-            av_log(avctx, AV_LOG_ERROR, "Error in dirac_decode_data_unit\n");
+            av_log(avctx, AV_LOG_ERROR, "Error in dirac_decode_data_unit : %d\n", ret);
             return ret;
         }
 
