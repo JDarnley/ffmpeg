@@ -1047,7 +1047,10 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
             if (s->prev_parse_info_position >= 0)
                 write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
             encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
-            encode_fragment_header(s, 0, s->fragment_size, x, y);
+            if (s->fragment_size == 1)
+                encode_fragment_header(s, arg->bytes, s->fragment_size, x, y);
+            else
+                encode_fragment_header(s, 0, s->fragment_size, x, y);
             avpriv_align_put_bits(&s->pb);
         }
 
