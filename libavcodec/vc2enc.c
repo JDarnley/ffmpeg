@@ -570,11 +570,12 @@ static void encode_transform_params(VC2EncContext *s)
     encode_quant_matrix(s);
 }
 
-static void encode_fragment_header(VC2EncContext *s, int slice_count, int x_offset, int y_offset)
+static void encode_fragment_header(VC2EncContext *s,
+        int data_length, int slice_count, int x_offset, int y_offset)
 {
     avpriv_align_put_bits(&s->pb);
     put_bits32(&s->pb, s->picture_number);
-    put_bits(&s->pb, 16, 0);
+    put_bits(&s->pb, 16, data_length);
     put_bits(&s->pb, 16, slice_count);
     if (slice_count) {
         put_bits(&s->pb, 16, x_offset);
@@ -1030,7 +1031,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
 
         before = put_bits_count(&s->pb) >> 3;
-        encode_fragment_header(s, 0, 0, 0);
+        encode_fragment_header(s, 0, 0, 0, 0);
         encode_transform_params(s);
         after = put_bits_count(&s->pb) >> 3;
 
@@ -1046,7 +1047,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
             if (s->prev_parse_info_position >= 0)
                 write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
             encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
-            encode_fragment_header(s, s->fragment_size, x, y);
+            encode_fragment_header(s, 0, s->fragment_size, x, y);
             avpriv_align_put_bits(&s->pb);
         }
 
