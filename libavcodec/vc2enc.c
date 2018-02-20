@@ -1012,6 +1012,8 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     init_put_bits(&s->pb, avpkt->data, avpkt->size);
 
     if (frame->pos_y == 0) {
+        int before, after;
+
         /* Sequence header */
         encode_parse_info(s, DIRAC_PCODE_SEQ_HEADER, 0, s->prev_offset);
         encode_seq_header(s);
@@ -1026,8 +1028,13 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         /* (14. Fragment Syntax) */
         write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
         encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
+
+        before = put_bits_count(&s->pb) >> 3;
         encode_fragment_header(s, 0, 0, 0);
         encode_transform_params(s);
+        after = put_bits_count(&s->pb) >> 3;
+
+        AV_WB16(s->pb.buf + before + 4, after - before - 8);
     }
 
     /* Encode slices */
