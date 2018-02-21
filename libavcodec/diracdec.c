@@ -1037,13 +1037,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             return ret;
         }
 
-        if (s->is_fragment) {
-            picture_element_present = s->fragment_slices_received == (s->num_x * s->num_y);
-        } else {
-            uint8_t parse_code = *(buf + buf_idx + 4);
-            picture_element_present |= parse_code == DIRAC_PCODE_PICTURE_HQ
-                || parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ;
-        }
+        picture_element_present = (s->num_x && s->num_y) && (s->fragment_slices_received == (s->num_x * s->num_y));
 
         if (data_unit_size)
             buf_idx += data_unit_size;
@@ -1053,10 +1047,13 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
     /* ref the top field's frame during field coded interlacing */
     if (s->field_coding) {
-        if (!s->current_picture)
-            return AVERROR_INVALIDDATA;
-        else if ((ret=av_frame_ref(data, s->current_picture)) < 0)
-            return ret;
+        if (s->current_picture)
+        {
+            if ((ret=av_frame_ref(data, s->current_picture)) < 0) {
+                av_log(avctx, AV_LOG_ERROR, "av_frame_ref returned %d\n", ret);
+                return ret;
+            }
+        }
     }
 
     /* No output for the top field, wait for the second */
@@ -1064,13 +1061,15 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         picture_element_present = 0;
 
     /* Return a frame only if there was a valid picture in the packet */
-    if (picture_element_present) {
+    if (picture_element_present && s->current_picture) {
         if (s->is_fragment) {
             avctx->execute2(avctx, idwt_plane, NULL, NULL, 3);
             av_frame_move_ref(data, s->cached_picture);
         }
 
         *got_frame = 1;
+        s->current_picture = NULL;
+        s->prev_field = NULL;
     } else {
         *got_frame = 0;
     }
