@@ -437,14 +437,16 @@ static int decode_lowdelay(DiracContext *s)
         }
 
         slice_num = get_bits_long(&s->gb, 16);
-        if (!slice_num || s->fragment_slices_received + slice_num > s->num_x*s->num_y) {
-            av_log(s->avctx, AV_LOG_ERROR, "invalid number of slices (%d || %d + %d > %d*%d)\n",
-                    slice_num, s->fragment_slices_received, slice_num, s->num_x, s->num_y);
-            return AVERROR_INVALIDDATA;
-        }
-
         x_offset = get_bits_long(&s->gb, 16);
         y_offset = get_bits_long(&s->gb, 16);
+
+        if (!slice_num || s->fragment_slices_received + slice_num > s->num_x*s->num_y) {
+            av_log(s->avctx, AV_LOG_ERROR, "invalid number of slices (%d || %d + %d > %d*%d), offset: %d,%d\n",
+                    slice_num, s->fragment_slices_received, slice_num, s->num_x, s->num_y, x_offset, y_offset);
+            //if (s->fragment_slices_received == (s->num_x * s->num_y))
+                //abort();
+            return AVERROR_INVALIDDATA;
+        }
 
         if (x_offset >= s->num_x || y_offset >= s->num_y) {
             av_log(s->avctx, AV_LOG_ERROR, "fragment slice offset (%d,%d) is invalid for slice dimensions (%dx%d)\n",
@@ -830,8 +832,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt,
                                                &s->chroma_x_shift,
                                                &s->chroma_y_shift);
-        if (ret < 0)
+        if (ret < 0) {
+            av_log(avctx, AV_LOG_ERROR, "av_pix_fmt_get_chroma_sub_sample returned %d\n", ret);
             return ret;
+        }
 
         if (avctx->width   != s->seq_buf_allocated_width ||
             avctx->width   != s->seq_buf_allocated_width ||
@@ -843,12 +847,16 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
             s->seq_buf_allocated_fmt    = avctx->pix_fmt;
             s->seq_buf_allocated_coding = s->field_coding;
             ret = alloc_sequence_buffers(s);
-            if (ret < 0)
+            if (ret < 0) {
+                av_log(avctx, AV_LOG_ERROR, "alloc_sequence_buffers returned %d\n", ret);
                 return ret;
+            }
         }
 
         s->seen_sequence_header = 1;
     } else if (parse_code == DIRAC_PCODE_END_SEQ) { /* [DIRAC_STD] End of Sequence */
+        if (s->fragment_slices_received < s->num_x * s->num_y)
+            av_log(avctx, AV_LOG_WARNING, "end sequence received before all slices\n");
         s->seen_sequence_header = 0;
         get_bits_read = DATA_UNIT_HEADER_SIZE * 8;
     } else if (parse_code == DIRAC_PCODE_AUX) {
@@ -1019,6 +1027,9 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         if (buf_idx + DATA_UNIT_HEADER_SIZE >= buf_size)
             break;
 
+        if (picture_element_present)
+            av_log(avctx, AV_LOG_INFO, "picture_element_present is true but more data in packet\n");
+
         data_unit_size = AV_RB32(buf+buf_idx+5);
         if (data_unit_size > buf_size - buf_idx) {
             av_log(avctx, AV_LOG_ERROR,
@@ -1033,11 +1044,11 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         else
             ret = dirac_decode_data_unit(avctx, f, buf+buf_idx, buf_size - buf_idx);
         if (ret < 0) {
-            av_log(avctx, AV_LOG_ERROR, "Error in dirac_decode_data_unit : %d\n", ret);
+            av_log(avctx, AV_LOG_DEBUG, "dirac_decode_data_unit returned %d for parse_code 0x%02X\n", ret, buf[buf_idx + 4]);
             return ret;
         }
 
-        picture_element_present = (s->num_x && s->num_y) && (s->fragment_slices_received == (s->num_x * s->num_y));
+        picture_element_present = s->num_x && s->num_y && (s->fragment_slices_received == (s->num_x * s->num_y));
 
         if (data_unit_size)
             buf_idx += data_unit_size;
