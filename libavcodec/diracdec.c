@@ -782,20 +782,28 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         }
         get_bits_read = ret;
 
-        if (CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS) * CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS) > avctx->max_pixels)
+        if (CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS) * CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS) > avctx->max_pixels) {
+            av_log(avctx, AV_LOG_ERROR, "padded frame (%"PRId64"x%"PRId64") is greater than avctx->max_pixels (%"PRId64")\n",
+                    CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS),
+                    CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS),
+                    avctx->max_pixels);
             ret = AVERROR(ERANGE);
-        if (ret >= 0)
+        } else {
             ret = ff_set_dimensions(avctx, dsh->width, dsh->height);
-
-        /* In case of interlacing halve the internal height */
-        if (dsh->field_coding)
-            dsh->height >>= 1;
+            if (ret < 0)
+                av_log(avctx, AV_LOG_ERROR, "ff_set_dimensions returned %d\n",
+                        ret);
+        }
 
         /* Error during decoding the sequence header */
         if (ret < 0) {
             av_freep(&dsh);
             return ret;
         }
+
+        /* In case of interlacing halve the internal height */
+        if (dsh->field_coding)
+            dsh->height >>= 1;
 
         /* Error on on change in pixel formats in the second field */
         if (s->cur_field && dsh->pix_fmt != s->prev_field_fmt) {
