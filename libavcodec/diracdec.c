@@ -465,7 +465,7 @@ static int decode_lowdelay(DiracContext *s)
             }
             if (bytes >= INT_MAX || bytes*8 > bufsize) {
                 /* TODO: improve message */
-                av_log(s->avctx, AV_LOG_ERROR, "too many bytes (%"PRId64" > %"PRId64" || %"PRId64" > %"PRId64"), size_scaler: %d\n",
+                av_log(s->avctx, AV_LOG_ERROR, "too many bytes (%"PRId64" > %"PRId64" || %"PRId64" > %"PRId64"), size_scaler: %"PRIu64"\n",
                         bytes, (int64_t)INT_MAX, bytes*8, (int64_t)bufsize, s->size_scaler);
                 return AVERROR_INVALIDDATA;
             }
