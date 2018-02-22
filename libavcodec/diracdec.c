@@ -917,8 +917,8 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
          * means allocate:
          * - everytime for non-fragmented, progressive streams
          * - every other time for non-fragmented, interlaced streams
-         *   everytime for a fragment with 0 slices for progressive streams
-         *   every other time for a fragment with 0 slices for interlaced streams
+         * - everytime for a fragment with 0 slices for progressive streams
+         * - every other time for a fragment with 0 slices for interlaced streams
          */
 
         if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
