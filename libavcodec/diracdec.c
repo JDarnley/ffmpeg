@@ -122,7 +122,6 @@ typedef struct DiracContext {
     /* fragments */
     int is_fragment;
     int fragment_data_length;
-    int fragment_slice_count;
     int fragment_slices_received;
 
     /* wavelet decoding */
@@ -838,7 +837,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         av_freep(&dsh);
 
         s->is_fragment = 0;
-        s->fragment_slice_count = 0;
         s->fragment_slices_received = 0;
 
         s->pshift = s->bit_depth > 8;
@@ -906,7 +904,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         if (s->is_fragment) {
             unsigned temp = show_bits_long(&s->gb, 32);
             s->fragment_data_length = temp >> 16;
-            num_slices = s->fragment_slice_count = temp & 0xFFFF;
+            num_slices = temp & 0xFFFF;
 
             //s->fragment_data_length = get_bits_long(&s->gb, 16); /* fragment_data_length */
             //s->fragment_slice_count = get_bits_long(&s->gb, 16);
@@ -921,7 +919,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
          * - every other time for a fragment with 0 slices for interlaced streams
          */
 
-        if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
+        if (!s->is_fragment || (s->is_fragment && num_slices == 0)) {
             if (!s->field_coding) {
                 if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
                     return ret;
@@ -960,7 +958,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
             }
         }
 
-        if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
+        if (!s->is_fragment || (s->is_fragment && num_slices == 0)) {
             /* because we didn't _read_ the fragment_data_length and
              * fragment_slice_count above we need to skip those 32-bits here. */
             if (s->is_fragment)
@@ -975,7 +973,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
             s->fragment_slices_received = 0;
         }
 
-        if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
+        if (!s->is_fragment || (s->is_fragment && num_slices == 0)) {
             /* Will warn if the encoder's not fast enough or the decoder's not fast
             * enough or if a frame wasn't able to be decoded and was dropped */
             if (s->current_picture->display_picture_number &&
