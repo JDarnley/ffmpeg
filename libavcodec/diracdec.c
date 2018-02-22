@@ -691,7 +691,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
         return ret;
     }
 
-    if (!s->is_fragment) {
+    if (!s->is_fragment || s->fragment_slices_received == s->num_x*s->num_y) {
         /* Does the iDWT on the 3 planes in parallel, not in git master since
         * the MC depends on doing it serially */
         s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
@@ -1082,7 +1082,6 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     /* Return a frame only if there was a valid picture in the packet */
     if (picture_element_present && s->current_picture) {
         if (s->is_fragment) {
-            avctx->execute2(avctx, idwt_plane, NULL, NULL, 3);
             av_frame_move_ref(data, s->cached_picture);
         }
 
