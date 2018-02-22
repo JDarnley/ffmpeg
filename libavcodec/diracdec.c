@@ -1068,6 +1068,13 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             buf_idx += ret + 7 >> 3;
     }
 
+    /* A frame should be output:
+     * - everytime for non-fragmented, progressive streams
+     * - every other time for non-fragmented, interlaced streams
+     *   everytime all slices are decoded for progressive streams
+     *   every other time all slices are decoded for interlaced streams
+     */
+
     /* ref the top field's frame during field coded interlacing */
     if (s->field_coding) {
         if (s->current_picture)
