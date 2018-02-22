@@ -702,6 +702,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
 
 static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
 {
+    DiracContext *s = avctx->priv_data;
     int ret;
 
     /* Pads the allocated height to + 2 * EDGE_WIDTH (+ 2)
@@ -709,11 +710,16 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
     f->width  = avctx->width  + 2 * EDGE_WIDTH;
     f->height = avctx->height + 2 * EDGE_WIDTH + 2;
     ret = ff_get_buffer(avctx, f, flags);
-    if (ret < 0)
+    if (ret < 0) {
+        av_log(avctx, AV_LOG_ERROR, "error getting buffer with edge\n");
         return ret;
+    }
 
     f->width  = avctx->width;
     f->height = avctx->height;
+    s->plane[0].stride = f->linesize[0];
+    s->plane[1].stride = f->linesize[1];
+    s->plane[2].stride = f->linesize[2];
 
     return 0;
 }
@@ -909,16 +915,11 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
         if (!s->is_fragment || (s->is_fragment && s->fragment_slice_count == 0)) {
             if (!s->field_coding) {
-                if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0) {
-                    av_log(s->avctx, AV_LOG_ERROR, "error getting progressive buf\n");
+                if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
                     return ret;
-                }
                 av_log(avctx, AV_LOG_INFO, "allocated progressive buf\n");
                 pic->display_picture_number = pict_num;
                 s->current_picture = pic;
-                s->plane[0].stride = pic->linesize[0];
-                s->plane[1].stride = pic->linesize[1];
-                s->plane[2].stride = pic->linesize[2];
                 s->cur_field = 0;
             } else {
                 /* Picks the field number based on the parity of the picture number */
@@ -926,15 +927,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
                 if (!s->cur_field) {
                     av_frame_unref(s->prev_field);
-                    if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0) {
-                        av_log(s->avctx, AV_LOG_ERROR, "error getting interlaced buf\n");
+                    if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
                         return ret;
-                    }
                     av_log(avctx, AV_LOG_INFO, "allocated interlaced buf\n");
                     s->prev_field = pic;
-                    s->plane[0].stride = pic->linesize[0];
-                    s->plane[1].stride = pic->linesize[1];
-                    s->plane[2].stride = pic->linesize[2];
                 } else {
                     if (!s->current_picture || !s->prev_field) {
                         av_log(avctx, AV_LOG_ERROR, "no current pic or not second field\n");
