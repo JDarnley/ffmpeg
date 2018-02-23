@@ -991,7 +991,13 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     encode_slices(s);
 
     /* End sequence */
-    encode_parse_info(s, DIRAC_PCODE_END_SEQ);
+    /* 2012 spec. 10.3.2, 2017 spec. 10.4.3:
+     * Where pictures are fields, a sequence shall comprise a whole number of
+     * frames (i.e., an even number of fields) and shall begin and end with a
+     * whole frame/field-pair. */
+    if (field != 1) {
+        encode_parse_info(s, DIRAC_PCODE_END_SEQ);
+    }
 
     return 0;
 }
