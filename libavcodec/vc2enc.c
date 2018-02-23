@@ -1071,7 +1071,11 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
 
     /* End sequence */
-    if (frame->pos_y == s->avctx->height - s->plane[0].slice_h) {
+    /* 2012 spec. 10.3.2, 2017 spec. 10.4.3:
+     * Where pictures are fields, a sequence shall comprise a whole number of
+     * frames (i.e., an even number of fields) and shall begin and end with a
+     * whole frame/field-pair. */
+    if (field != 1 && frame->pos_y == s->avctx->height - s->plane[0].slice_h) {
         encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
     }
 
@@ -1137,7 +1141,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
     /* Calls encode_frame() once for each field (or once for progressive) */
 
-    ret = encode_frame(s, avpkt, frame, aux_data, header_size, s->interlaced);
+    ret = encode_frame(s, avpkt, frame, aux_data, header_size, (s->interlaced) ? 1 + (s->picture_number & 1) : 0);
     if (ret)
         return ret;
 
