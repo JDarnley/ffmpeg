@@ -1073,7 +1073,6 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     /* End sequence */
     if (frame->pos_y == s->avctx->height - s->plane[0].slice_h) {
         encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
-        s->picture_number++;
     }
 
     return 0;
@@ -1146,8 +1145,10 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     avpkt->size = put_bits_count(&s->pb) >> 3;
 
     s->expected_pos_y += frame->height;
-    if (s->expected_pos_y >= avctx->height)
+    if (s->expected_pos_y >= avctx->height) {
         s->expected_pos_y = 0;
+        s->picture_number++;
+    }
 
     *got_packet = 1;
 
