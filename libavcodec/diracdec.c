@@ -932,7 +932,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                 s->cur_field = pict_num & 1;
 
                 if (!s->cur_field) {
-                    av_frame_unref(s->prev_field);
                     if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
                         return ret;
                     av_log(avctx, AV_LOG_INFO, "allocated interlaced buf\n");
@@ -1058,7 +1057,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             return ret;
         }
 
-        picture_element_present = s->num_x && s->num_y && (s->fragment_slices_received == (s->num_x * s->num_y));
+        picture_element_present |= *(buf + buf_idx + 4) & 0x8;
 
         if (data_unit_size)
             buf_idx += data_unit_size;
@@ -1073,36 +1072,34 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
      *   every other time all slices are decoded for interlaced streams
      */
 
-    /* ref the top field's frame during field coded interlacing */
-    if (s->field_coding) {
-        if (s->current_picture)
-        {
-            if ((ret=av_frame_ref(data, s->current_picture)) < 0) {
-                av_log(avctx, AV_LOG_ERROR, "av_frame_ref returned %d\n", ret);
-                return ret;
-            }
+    *got_frame = 0;
+    if (picture_element_present) {
+        if (!s->is_fragment) {
+            if (!s->field_coding)
+                goto output_frame;
+            else if (s->cur_field)
+                goto output_frame;
+        } else if (s->fragment_slices_received == s->num_x * s->num_y) {
+            if (!s->field_coding)
+                goto output_frame;
+            else if (s->cur_field)
+                goto output_frame;
         }
     }
-
-    /* No output for the top field, wait for the second */
-    if (s->field_coding && !s->cur_field)
-        picture_element_present = 0;
-
-    /* Return a frame only if there was a valid picture in the packet */
-    if (picture_element_present && s->current_picture) {
-        if (s->is_fragment) {
-            av_frame_move_ref(data, s->cached_picture);
-        }
-
-        *got_frame = 1;
-        s->current_picture = NULL;
-        s->prev_field = NULL;
-    } else {
-        *got_frame = 0;
-    }
-
 
     /* Total bytes read */
+    return buf_idx;
+
+output_frame:
+
+    if (s->is_fragment || s->field_coding) {
+        av_frame_move_ref(data, s->cached_picture);
+    }
+
+    s->current_picture = NULL;
+    s->prev_field = NULL;
+    *got_frame = 1;
+
     return buf_idx;
 }
 
