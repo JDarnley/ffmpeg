@@ -32,9 +32,8 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mem.h"
 
+#include "dirac.h"
 #include "parser.h"
-
-#define DIRAC_PARSE_INFO_PREFIX 0x42424344
 
 /**
  * Find the end of the current frame in the bitstream.
@@ -62,7 +61,7 @@ static int find_frame_end(DiracParseContext *pc,
     if (!pc->is_synced) {
         for (i = 0; i < buf_size; i++) {
             state = (state << 8) | buf[i];
-            if (state == DIRAC_PARSE_INFO_PREFIX) {
+            if (state == DIRAC_PCODE_MAGIC) {
                 state                   = -1;
                 pc->is_synced           = 1;
                 pc->header_bytes_needed = 9;
@@ -75,7 +74,7 @@ static int find_frame_end(DiracParseContext *pc,
     if (pc->is_synced) {
         pc->sync_offset = 0;
         for (; i < buf_size; i++) {
-            if (state == DIRAC_PARSE_INFO_PREFIX) {
+            if (state == DIRAC_PCODE_MAGIC) {
                 if ((buf_size - i) >= pc->header_bytes_needed) {
                     pc->state = -1;
                     return i + pc->header_bytes_needed;
@@ -123,7 +122,7 @@ static int unpack_parse_unit(DiracParseUnit *pu, DiracParseContext *pc,
     if (i == FF_ARRAY_ELEMS(valid_pu_types))
         return 0;
 
-    if (pu->pu_type == 0x10 && pu->next_pu_offset == 0x00)
+    if (pu->pu_type == DIRAC_PCODE_END_SEQ && pu->next_pu_offset == 0)
         pu->next_pu_offset = 13; /* The length of a parse info header */
 
     /* Check if the parse offsets are somewhat sane */
@@ -146,7 +145,7 @@ static int dirac_combine_frame(AVCodecParserContext *s, AVCodecContext *avctx,
                pc->index - pc->overread_index);
         pc->index         -= pc->overread_index;
         pc->overread_index = 0;
-        if (*buf_size == 0 && pc->buffer[4] == 0x10) {
+        if (*buf_size == 0 && pc->buffer[4] == DIRAC_PCODE_END_SEQ) {
             *buf      = pc->buffer;
             *buf_size = pc->index;
             return 0;
