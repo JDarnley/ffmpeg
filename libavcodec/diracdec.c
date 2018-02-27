@@ -180,6 +180,10 @@ typedef struct DiracContext {
     DiracSlice *slice_params_buf;
     int slice_params_num_buf;
 
+    int is_fragment;
+    int hq_fragment;
+    int fragment_slices_received;
+
     struct {
         unsigned width;
         unsigned height;
@@ -949,6 +953,62 @@ static int decode_lowdelay(DiracContext *s)
     if (s->hq_picture) {
         int i;
 
+        if (s->is_fragment) {
+            int fragment_data_len, x_offset, y_offset, slice;
+
+            fragment_data_len = get_bits_long(&s->gb, 16);
+            slice_num = get_bits_long(&s->gb, 16);
+            x_offset = get_bits_long(&s->gb, 16);
+            y_offset = get_bits_long(&s->gb, 16);
+            bufsize -= 8;
+            buf += 8;
+
+            if (fragment_data_len > bufsize) {
+                av_log(avctx, AV_LOG_ERROR, "invalid fragment data length\n");
+                return AVERROR_INVALIDDATA;
+            }
+
+            if (s->fragment_slices_received + slice_num > s->num_x*s->num_y) {
+                av_log(avctx, AV_LOG_ERROR, "invalid number of slices (%d || %d + %d > %d*%d), offset: %d,%d\n",
+                        slice_num, s->fragment_slices_received, slice_num, s->num_x, s->num_y, x_offset, y_offset);
+                return AVERROR_INVALIDDATA;
+            }
+
+            if (x_offset >= s->num_x || y_offset >= s->num_y) {
+                av_log(avctx, AV_LOG_ERROR, "fragment slice offset (%d,%d) is invalid for slice dimensions (%dx%d)\n",
+                        x_offset, y_offset, s->num_x, s->num_y);
+                return AVERROR_INVALIDDATA;
+            }
+
+            for (slice = 0; bufsize > 0 && slice < slice_num; slice++) {
+                bytes = s->highquality.prefix_bytes + 1;
+                for (i = 0; i < 3; i++) {
+                    if (bytes <= bufsize/8)
+                        bytes += buf[bytes] * s->highquality.size_scaler + 1;
+                }
+                if (bytes >= INT_MAX || bytes*8 > bufsize) {
+                    av_log(avctx, AV_LOG_ERROR, "too many bytes\n");
+                    return AVERROR_INVALIDDATA;
+                }
+
+                slice_x = (y_offset*s->num_x + x_offset + slice) % s->num_x;
+                slice_y = (y_offset*s->num_x + x_offset + slice) / s->num_x;
+                slices[slice].bytes   = bytes;
+                slices[slice].slice_x = slice_x;
+                slices[slice].slice_y = slice_y;
+                init_get_bits(&slices[slice].gb, buf, bufsize);
+
+                buf     += bytes;
+                if (bufsize/8 >= bytes)
+                    bufsize -= bytes*8;
+                else
+                    bufsize = 0;
+
+                decode_hq_slice(s, &slices[slice], s->thread_buf); //TODO: use returned error code
+            }
+
+            s->fragment_slices_received += slice_num;
+        } else { /* not fragment */
         for (slice_y = 0; bufsize > 0 && slice_y < s->num_y; slice_y++) {
             for (slice_x = 0; bufsize > 0 && slice_x < s->num_x; slice_x++) {
                 bytes = s->highquality.prefix_bytes + 1;
@@ -981,6 +1041,7 @@ static int decode_lowdelay(DiracContext *s)
         }
 
         avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, s->num_y);
+        }
     } else {
         for (slice_y = 0; bufsize > 0 && slice_y < s->num_y; slice_y++) {
             for (slice_x = 0; bufsize > 0 && slice_x < s->num_x; slice_x++) {
@@ -1865,6 +1926,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
         }
     }
 
+    if (!s->is_fragment || s->fragment_slices_received == s->num_x*s->num_y) {
     for (comp = 0; comp < 3; comp++) {
         Plane *p       = &s->plane[comp];
         uint8_t *frame = s->current_picture->avframe->data[comp];
@@ -1935,7 +1997,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
             }
         }
     }
-
+    }
 
     return 0;
 }
@@ -2140,6 +2202,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         s->seq                 = *dsh;
         av_freep(&dsh);
 
+        s->is_fragment = 0;
+        s->hq_fragment = 0;
+        s->fragment_slices_received = 0;
+
         s->pshift = s->bit_depth > 8;
 
         ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt,
@@ -2164,6 +2230,75 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             if (sscanf(buf+14, "Schroedinger %d.%d.%d", ver, ver+1, ver+2) == 3)
                 if (ver[0] == 1 && ver[1] == 0 && ver[2] <= 7)
                     s->old_delta_quant = 1;
+        }
+    } else if (parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
+        int num_slices = -1;
+        unsigned picture_number;
+
+        if (!s->seen_sequence_header) {
+            av_log(avctx, AV_LOG_DEBUG, "Dropping fragment without sequence header\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        tmp            =  parse_code & 0x03;                   /* [DIRAC_STD] num_refs()      */
+        if (tmp > 2) {
+            av_log(avctx, AV_LOG_ERROR, "num_refs of 3\n");
+            return AVERROR_INVALIDDATA;
+        }
+        s->num_refs      = tmp;
+        s->is_arith      = (parse_code & 0x48) == 0x08;          /* [DIRAC_STD] using_ac()            */
+        s->low_delay     = (parse_code & 0x88) == 0x88;          /* [DIRAC_STD] is_low_delay()        */
+        s->core_syntax   = (parse_code & 0x88) == 0x08;          /* [DIRAC_STD] is_core_syntax()      */
+        s->ld_picture    = (parse_code & 0xF8) == 0xC8;          /* [DIRAC_STD] is_ld_picture()       */
+        s->hq_picture    = (parse_code & 0xF8) == 0xE8;          /* [DIRAC_STD] is_hq_picture()       */
+        s->dc_prediction = (parse_code & 0x28) == 0x08;          /* [DIRAC_STD] using_dc_prediction() */
+        s->is_fragment   = (parse_code & 0x0C) == 0x0C;          /* [DIRAC_STD] is_fragment()         */
+        s->hq_fragment   = (parse_code & 0xFC) == 0xEC;          /* [DIRAC_STD] is_hq_fragment()      */
+
+        if (s->low_delay && !(s->ld_picture || s->hq_picture) ) {
+            av_log(avctx, AV_LOG_ERROR, "Invalid low delay flag\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        if (s->version.major < 3)
+            av_log(avctx, AV_LOG_WARNING, "HQ Fragment syntax is only defined in version 3, something might be broken\n");
+
+        align_get_bits(&s->gb);
+        picture_number = get_bits_long(&s->gb, 32);
+
+        tmp = show_bits_long(&s->gb, 32);
+        num_slices = tmp & 0xFFFF;
+
+        if (num_slices == 0) {
+            pic = &s->all_frames[0];
+            av_frame_unref(pic->avframe);
+            if ((ret = get_buffer_with_edge(avctx, pic->avframe, (parse_code & 0x0C) == 0x0C ? AV_GET_BUFFER_FLAG_REF : 0)) < 0)
+                return ret;
+
+            s->current_picture = pic;
+            s->plane[0].stride = pic->avframe->linesize[0];
+            s->plane[1].stride = pic->avframe->linesize[1];
+            s->plane[2].stride = pic->avframe->linesize[2];
+
+            if (alloc_buffers(s, FFMAX3(FFABS(s->plane[0].stride), FFABS(s->plane[1].stride), FFABS(s->plane[2].stride))) < 0)
+                return AVERROR(ENOMEM);
+
+            pic->reference = 0;
+            pic->avframe->key_frame = s->num_refs == 0;              /* [DIRAC_STD] is_intra()            */
+            pic->avframe->pict_type = s->num_refs + 1;               /* Definition of AVPictureType in avutil.h */
+            pic->avframe->display_picture_number = picture_number;
+
+            skip_bits_long(&s->gb, 32);
+            ret = dirac_decode_picture_header(s);
+            if (ret < 0)
+                return ret;
+
+            /* Spec 14.3 part of initialize_fragment_state */
+            s->fragment_slices_received = 0;
+        } else { /* slice_num != 0 */
+            ret = dirac_decode_frame_internal(s);
+            if (ret < 0)
+                return ret;
         }
     } else if (parse_code & 0x8) {  /* picture data unit */
         if (!s->seen_sequence_header) {
@@ -2244,6 +2379,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     int ret;
     unsigned data_unit_size;
 
+#if 0
     /* release unused frames */
     for (i = 0; i < MAX_FRAMES; i++)
         if (s->all_frames[i].avframe->data[0] && !s->all_frames[i].reference) {
@@ -2252,6 +2388,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         }
 
     s->current_picture = NULL;
+#endif
     *got_frame = 0;
 
     /* end of stream, so flush delayed pics */
@@ -2293,6 +2430,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     if (!s->current_picture)
         return buf_size;
 
+    if (!s->is_fragment || s->fragment_slices_received == s->num_x*s->num_y) {
     if (s->current_picture->avframe->display_picture_number > s->frame_number) {
         DiracFrame *delayed_frame = remove_frame(s->delay_frames, s->frame_number);
 
@@ -2322,6 +2460,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         if((ret=av_frame_ref(data, s->current_picture->avframe)) < 0)
             return ret;
         *got_frame = 1;
+    }
     }
 
     if (*got_frame)
