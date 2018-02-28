@@ -1972,14 +1972,10 @@ static int get_buffer_with_edge(AVCodecContext *avctx, AVFrame *f, int flags)
  */
 static int dirac_decode_picture_header(DiracContext *s)
 {
-    unsigned retire, picnum;
+    unsigned retire, picnum = s->current_picture->avframe->display_picture_number;
     int i, j, ret;
     int64_t refdist, refnum;
     GetBitContext *gb = &s->gb;
-
-    /* [DIRAC_STD] 11.1.1 Picture Header. picture_header() PICTURE_NUM */
-    picnum = s->current_picture->avframe->display_picture_number = get_bits_long(gb, 32);
-
 
     av_log(s->avctx,AV_LOG_DEBUG,"PICTURE_NUM: %d\n",picnum);
 
@@ -2221,6 +2217,9 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
 
         if (alloc_buffers(s, FFMAX3(FFABS(s->plane[0].stride), FFABS(s->plane[1].stride), FFABS(s->plane[2].stride))) < 0)
             return AVERROR(ENOMEM);
+
+        /* [DIRAC_STD] 11.1.1 Picture Header. picture_header() PICTURE_NUM */
+        s->current_picture->avframe->display_picture_number = get_bits_long(&s->gb, 32);
 
         /* [DIRAC_STD] 11.1 Picture parse. picture_parse() */
         ret = dirac_decode_picture_header(s);
