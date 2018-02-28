@@ -1241,6 +1241,22 @@ static int dirac_unpack_idwt_params(DiracContext *s)
         }
     }
     else {
+        /* [SMPTE ST 2042-1:2017] 12.4.4 Extended Transform Parameters */
+        if (s->version.major >= 3) {
+            int asym_transform_index_flag, asym_transform_flag;
+
+            asym_transform_index_flag = get_bits1(gb);
+            if (asym_transform_index_flag)
+                get_interleaved_ue_golomb(gb);
+
+            asym_transform_flag = get_bits1(gb);
+            if (asym_transform_flag)
+                get_interleaved_ue_golomb(gb);
+
+            if (asym_transform_index_flag || asym_transform_flag)
+                avpriv_request_sample(s->avctx, "Asymmetric transform");
+        }
+
         s->num_x        = get_interleaved_ue_golomb(gb);
         s->num_y        = get_interleaved_ue_golomb(gb);
         if (s->num_x * s->num_y == 0 || s->num_x * (uint64_t)s->num_y > INT_MAX) {
