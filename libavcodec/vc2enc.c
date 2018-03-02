@@ -1092,8 +1092,9 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     s->slice_min_bytes = 0;
 
     /* Mark unknown as progressive */
-    s->interlaced = !((avctx->field_order == AV_FIELD_UNKNOWN) ||
-                      (avctx->field_order == AV_FIELD_PROGRESSIVE));
+    if (s->interlaced == -1)
+        s->interlaced = !((avctx->field_order == AV_FIELD_UNKNOWN) ||
+                          (avctx->field_order == AV_FIELD_PROGRESSIVE));
 
     for (i = 0; i < base_video_fmts_len; i++) {
         const VC2BaseVideoFormat *fmt = &base_video_fmts[i];
@@ -1258,6 +1259,7 @@ static const AVOption vc2enc_options[] = {
         {"default",   "Default from the specifications", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_DEF}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"color",     "Prevents low bitrate discoloration", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_COL}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
         {"flat",      "Optimize for PSNR", 0, AV_OPT_TYPE_CONST, {.i64 = VC2_QM_FLAT}, INT_MIN, INT_MAX, VC2ENC_FLAGS, "quant_matrix"},
+    {"interlaced", "Force field-separated interlaced coding", offsetof(VC2EncContext, interlaced), AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, VC2ENC_FLAGS},
     {NULL}
 };
 
