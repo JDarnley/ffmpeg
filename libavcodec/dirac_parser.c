@@ -116,10 +116,10 @@ static int unpack_parse_unit(DiracParseUnit *pu, DiracParseContext *pc,
     pu->prev_pu_offset = AV_RB32(start + 9);
 
     /* Check for valid parse code */
-    for (i = 0; i < sizeof(valid_pu_types); i++)
+    for (i = 0; i < FF_ARRAY_ELEMS(valid_pu_types); i++)
         if (valid_pu_types[i] == pu->pu_type)
             break;
-    if (i == sizeof(valid_pu_types))
+    if (i == FF_ARRAY_ELEMS(valid_pu_types))
         return 0;
 
     if (pu->pu_type == DIRAC_PCODE_END_SEQ && pu->next_pu_offset == 0)
