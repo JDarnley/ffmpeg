@@ -968,6 +968,9 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
             return ret;
         }
         init_put_bits(&s->pb, avpkt->data, avpkt->size);
+    } else if (max_frame_bytes - header_size > put_bits_left(&s->pb) / 8) {
+        av_log(s->avctx, AV_LOG_ERROR, "second field too big for remaining buffer\n");
+        return AVERROR_PATCHWELCOME;
     }
 
     /* Sequence header */
