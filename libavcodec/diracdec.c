@@ -149,6 +149,8 @@ typedef struct DiracContext {
     int bit_depth;              /* bit depth                                 */
     int pshift;                 /* pixel shift = bit_depth > 8               */
 
+    int field_coding;
+
     int zero_res;               /* zero residue flag                         */
     int is_arith;               /* whether coeffs use arith or golomb coding */
     int core_syntax;            /* use core syntax only                      */
@@ -2191,6 +2193,9 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             return ret;
         }
 
+        if (dsh->field_coding)
+            dsh->height >>= 1;
+
         ff_set_sar(avctx, dsh->sample_aspect_ratio);
         avctx->pix_fmt         = dsh->pix_fmt;
         avctx->color_range     = dsh->color_range;
@@ -2200,6 +2205,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
         avctx->profile         = dsh->profile;
         avctx->level           = dsh->level;
         avctx->framerate       = dsh->framerate;
+        s->field_coding        = dsh->field_coding;
         s->bit_depth           = dsh->bit_depth;
         s->version.major       = dsh->version.major;
         s->version.minor       = dsh->version.minor;
