@@ -1939,6 +1939,8 @@ static int dirac_decode_frame_internal(DiracContext *s)
         uint8_t *frame = s->current_picture->avframe->data[comp];
         const ptrdiff_t stride = p->stride << s->field_coding;
 
+        frame += s->is_second_field * p->stride;
+
         /* FIXME: small resolutions */
         for (i = 0; i < 4; i++)
             s->edge_emu_buffer[i] = s->edge_emu_buffer_base + i*FFALIGN(p->width, 16);
@@ -2300,6 +2302,8 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             pic->avframe->pict_type = s->num_refs + 1;               /* Definition of AVPictureType in avutil.h */
             pic->avframe->display_picture_number = picture_number;
 
+            s->is_second_field = s->field_coding && (picture_number & 1);
+
             skip_bits_long(&s->gb, 32);
             ret = dirac_decode_picture_header(s);
             if (ret < 0)
@@ -2313,6 +2317,8 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
                 return ret;
         }
     } else if (parse_code & 0x8) {  /* picture data unit */
+        unsigned picture_number;
+
         if (!s->seen_sequence_header) {
             av_log(avctx, AV_LOG_DEBUG, "Dropping frame without sequence header\n");
             return AVERROR_INVALIDDATA;
@@ -2366,7 +2372,9 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, const uint8_t *buf, int
             return AVERROR(ENOMEM);
 
         /* [DIRAC_STD] 11.1.1 Picture Header. picture_header() PICTURE_NUM */
-        s->current_picture->avframe->display_picture_number = get_bits_long(&s->gb, 32);
+        picture_number = s->current_picture->avframe->display_picture_number = get_bits_long(&s->gb, 32);
+
+        s->is_second_field = s->field_coding && (picture_number & 1);
 
         /* [DIRAC_STD] 11.1 Picture parse. picture_parse() */
         ret = dirac_decode_picture_header(s);
@@ -2442,6 +2450,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     if (!s->current_picture)
         return buf_size;
 
+    if (!s->field_coding || s->is_second_field) {
     if (!s->is_fragment || s->fragment_slices_received == s->num_x*s->num_y) {
     if (s->current_picture->avframe->display_picture_number > s->frame_number) {
         DiracFrame *delayed_frame = remove_frame(s->delay_frames, s->frame_number);
@@ -2472,6 +2481,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         if((ret=av_frame_ref(data, s->current_picture->avframe)) < 0)
             return ret;
         *got_frame = 1;
+    }
     }
     }
 
