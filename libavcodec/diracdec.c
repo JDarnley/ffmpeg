@@ -150,6 +150,7 @@ typedef struct DiracContext {
     int pshift;                 /* pixel shift = bit_depth > 8               */
 
     int field_coding;
+    int is_second_field;
 
     int zero_res;               /* zero residue flag                         */
     int is_arith;               /* whether coeffs use arith or golomb coding */
@@ -1936,6 +1937,7 @@ static int dirac_decode_frame_internal(DiracContext *s)
     for (comp = 0; comp < 3; comp++) {
         Plane *p       = &s->plane[comp];
         uint8_t *frame = s->current_picture->avframe->data[comp];
+        const ptrdiff_t stride = p->stride << s->field_coding;
 
         /* FIXME: small resolutions */
         for (i = 0; i < 4; i++)
@@ -1955,8 +1957,8 @@ static int dirac_decode_frame_internal(DiracContext *s)
             for (y = 0; y < p->height; y += 16) {
                 int idx = (s->bit_depth - 8) >> 1;
                 ff_spatial_idwt_slice2(&d, y+16); /* decode */
-                s->diracdsp.put_signed_rect_clamped[idx](frame + y*p->stride,
-                                                         p->stride,
+                s->diracdsp.put_signed_rect_clamped[idx](frame + y*stride,
+                                                         stride,
                                                          p->idwt.buf + y*p->idwt.stride,
                                                          p->idwt.stride, p->width, 16);
             }
