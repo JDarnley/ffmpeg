@@ -1060,9 +1060,10 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
 
 
     if (field < 2) {
-        ret = ff_alloc_packet2(s->avctx, avpkt,
-                               max_frame_bytes << s->interlaced,
-                               max_frame_bytes << s->interlaced);
+        /* Slice sizes can vary by tolerance (percentage) meaning the second field
+         * can become bigger than the first field so more space is required. */
+        max_frame_bytes += s->interlaced * ((100.0 + s->tolerance) / 100.0) * max_frame_bytes;
+        ret = ff_alloc_packet2(s->avctx, avpkt, max_frame_bytes, max_frame_bytes);
         if (ret) {
             av_log(s->avctx, AV_LOG_ERROR, "Error getting output packet.\n");
             return ret;
