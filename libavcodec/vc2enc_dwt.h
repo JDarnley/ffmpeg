@@ -44,7 +44,8 @@ typedef struct VC2TransformContext {
     int padding;
     void (*vc2_subband_dwt[VC2_TRANSFORMS_NB])(dwtcoef *synth,
                                                dwtcoef *data, ptrdiff_t stride,
-                                               int width, int height);
+                                               int width, int height,
+                                               const ptrdiff_t hstride);
 } VC2TransformContext;
 
 int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_stride, int p_height,

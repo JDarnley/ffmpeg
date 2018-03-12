@@ -96,6 +96,7 @@ typedef struct SubBand {
     int width;
     int height;
     int left, right, top, bottom;
+    int hstride;
 } SubBand;
 
 typedef struct Plane {
@@ -595,19 +596,23 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
 {
     int x, y;
 
+    const int left   = b->width  * (sx+0) / s->num_x;
+    const int right  = b->width  * (sx+1) / s->num_x;
+    const int top    = b->height * (sy+0) / s->num_y;
+    const int bottom = b->height * (sy+1) / s->num_y;
+
     const int qfactor = ff_dirac_qscale_tab[quant];
     const uint8_t  *len_lut = &s->coef_lut_len[quant*COEF_LUT_TAB];
     const uint32_t *val_lut = &s->coef_lut_val[quant*COEF_LUT_TAB];
 
-    dwtcoef *coeff = p->coef_buf
-                   + sx*p->slice_w
-                   + sy*p->slice_h*p->coef_stride
-                   + b->top*p->coef_stride;
+    dwtcoef *coeff = b->buf + top * b->stride;
 
-    for (y = b->top; y < b->bottom; y++) {
-        for (x = b->left; x < b->right; x++) {
-            const int neg = coeff[x] < 0;
-            uint32_t c_abs = FFABS(coeff[x]);
+    const ptrdiff_t hstride = b->hstride;
+
+    for (y = top; y < bottom; y++) {
+        for (x = left; x < right; x++) {
+            const int neg = coeff[x * hstride] < 0;
+            uint32_t c_abs = FFABS(coeff[x * hstride]);
             if (c_abs < COEF_LUT_TAB) {
                 /* Append the sign to the end of the LUT value */
                 put_bits(pb, len_lut[c_abs], val_lut[c_abs] | neg);
@@ -618,7 +623,7 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
                     put_bits(pb, 1, neg);
             }
         }
-        coeff += p->coef_stride;
+        coeff += b->stride;
     }
 }
 
@@ -649,25 +654,24 @@ static int count_hq_slice(SliceArgs *slice, int quant_idx)
         bits += 8;
         for (level = 0; level < s->wavelet_depth; level++) {
             for (orientation = !!level; orientation < 4; orientation++) {
-                SubBand *b = &s->plane[i].band[level][orientation];
+                SubBand *b = &p->band[level][orientation];
 
                 const int q_idx = quants[level][orientation];
                 const uint8_t *len_lut = &s->coef_lut_len[q_idx*COEF_LUT_TAB];
                 const int qfactor = ff_dirac_qscale_tab[q_idx];
 
-                const int left   = b->left;
-                const int right  = b->right;
-                const int top    = b->top;
-                const int bottom = b->bottom;
+                const int left   = b->width  * slice->x    / s->num_x;
+                const int right  = b->width  *(slice->x+1) / s->num_x;
+                const int top    = b->height * slice->y    / s->num_y;
+                const int bottom = b->height *(slice->y+1) / s->num_y;
 
-                dwtcoef *buf = p->coef_buf
-                               + sx*p->slice_w
-                               + sy*p->slice_h*p->coef_stride
-                               + top*p->coef_stride;
+                dwtcoef *buf = b->buf + top * b->stride;
+
+                const ptrdiff_t hstride = b->hstride;
 
                 for (y = top; y < bottom; y++) {
                     for (x = left; x < right; x++) {
-                        uint32_t c_abs = FFABS(buf[x]);
+                        uint32_t c_abs = FFABS(buf[x * hstride]);
                         if (c_abs < COEF_LUT_TAB) {
                             bits += len_lut[c_abs];
                         } else {
@@ -938,7 +942,12 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     ptrdiff_t pixel_stride = frame->linesize[i_plane] >> (s->bpp - 1);
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
+
+    /* Advance the plane coefficient buffer to top left corner of slice while
+     * keeping data in place. */
     dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
+
+    /* Skip over whole slices worth of samples to get to unused area of buffer. */
     dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
     ptrdiff_t offset = x*w + y*h*pixel_stride;
@@ -967,10 +976,11 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     }
 
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
+        SubBand *b = &p->band[level][0];
         w >>= 1;
         h >>= 1;
-        t->vc2_subband_dwt[idx](transform_buf, coeff_data, coeff_stride,
-                w, h);
+        t->vc2_subband_dwt[idx](transform_buf, coeff_data, b->stride >> 1,
+                w, h, b->hstride >> 1);
     }
 
     return 0;
@@ -1186,7 +1196,6 @@ static av_cold int vc2_encode_end(AVCodecContext *avctx)
 
 static av_cold int vc2_encode_init(AVCodecContext *avctx)
 {
-    SubBand *b;
     int i, j, level, o, shift, ret;
     int const_quant = 0;
     const AVPixFmtDescriptor *fmt = av_pix_fmt_desc_get(avctx->pix_fmt);
@@ -1328,6 +1337,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         int slice_h        = s->slice_height >> chroma_y_shift;
         int alignment      = 1 << s->wavelet_depth;
         Plane *p           = &s->plane[i];
+        int hstride        = 1;
 
         if (slice_w & (alignment-1) || slice_h & (alignment-1)) {
             av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) for plane %d not a multiple of the wavelet depth (2**%d, %d)\n",
@@ -1363,12 +1373,14 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
             h = h >> 1;
             slice_w >>= 1;
             slice_h >>= 1;
+            hstride <<= 1;
             for (o = 0; o < 4; o++) {
-                b = &p->band[level][o];
+                SubBand *b = &p->band[level][o];
                 b->width  = w;
                 b->height = h;
-                b->stride = p->coef_stride;
-                shift = (o > 1)*b->height*b->stride + (o & 1)*b->width;
+                b->hstride = hstride;
+                b->stride = p->coef_stride * hstride;
+                shift = (o > 1)*(b->stride >> 1) + (o & 1)*(hstride >> 1);
                 b->buf = p->coef_buf + shift;
 
                 b->left   = (o&1) * slice_w;
