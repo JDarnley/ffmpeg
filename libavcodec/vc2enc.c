@@ -1209,6 +1209,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     s->interlaced = !((avctx->field_order == AV_FIELD_UNKNOWN) ||
                       (avctx->field_order == AV_FIELD_PROGRESSIVE));
 
+    {
     int height = avctx->height;
     AVRational tb = avctx->time_base;
     if (s->interlaced) {
@@ -1234,6 +1235,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         s->base_vf = i;
         s->level   = base_video_fmts[i].level;
         break;
+    }
     }
 
     if (s->interlaced)
