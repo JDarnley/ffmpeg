@@ -95,7 +95,6 @@ typedef struct SubBand {
     ptrdiff_t stride;
     int width;
     int height;
-    int left, right, top, bottom;
     int hstride;
 } SubBand;
 
@@ -633,8 +632,6 @@ static int count_hq_slice(SliceArgs *slice, int quant_idx)
     uint8_t quants[MAX_DWT_LEVELS][4];
     int bits = 0, i, level, orientation;
     VC2EncContext *s = slice->ctx;
-    int sx = slice->x;
-    int sy = slice->y;
 
     /* Check the cache */
     if (slice->cache[quant_idx])
@@ -1386,11 +1383,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                 b->stride = p->coef_stride * hstride;
                 shift = (o > 1)*(b->stride >> 1) + (o & 1)*(hstride >> 1);
                 b->buf = p->coef_buf + shift;
-
-                b->left   = (o&1) * slice_w;
-                b->top    = (o>1) * slice_h;
-                b->right  = b->left + slice_w;
-                b->bottom = b->top  + slice_h;
             }
         }
     }
