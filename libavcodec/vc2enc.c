@@ -862,8 +862,14 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
         }
         avpriv_align_put_bits(pb);
         bytes_len = (put_bits_count(pb) >> 3) - bytes_start - 1;
+        if (i == 2) {
+            int len_diff = slice_dat->bytes - (put_bits_count(pb) >> 3);
+            pad_s = FFALIGN((bytes_len + len_diff), s->size_scaler)/s->size_scaler;
+            pad_c = (pad_s*s->size_scaler) - bytes_len;
+        } else {
             pad_s = FFALIGN(bytes_len, s->size_scaler)/s->size_scaler;
             pad_c = (pad_s*s->size_scaler) - bytes_len;
+        }
         pb->buf[bytes_start] = pad_s;
         flush_put_bits(pb);
         /* vc2-reference uses that padding that decodes to '0' coeffs -
