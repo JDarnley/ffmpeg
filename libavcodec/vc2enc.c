@@ -923,7 +923,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
     const int idx = s->wavelet_idx;
 
     ptrdiff_t linesize = transform_dat->istride;
-    int level, offset;
+    int level, offset, y;
 
     if (field == 1) {
         offset = 0;
@@ -935,9 +935,12 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
         offset = 0;
     }
 
-    load_pixel_data((const uint8_t *)frame_data + offset, p->coef_buf,
-            linesize, p->coef_stride,
-            p->width, p->height, s->bpp, s->diff_offset);
+    for (y = 0; y < p->height; y += 16) {
+        load_pixel_data((const uint8_t *)frame_data + offset + y*linesize,
+                p->coef_buf + y*p->coef_stride,
+                linesize, p->coef_stride,
+                p->width, 16, s->bpp, s->diff_offset);
+    }
     memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 
     for (level = s->wavelet_depth-1; level >= 0; level--) {
