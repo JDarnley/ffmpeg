@@ -27,6 +27,7 @@
 #include "version.h"
 
 #include "vc2enc_dwt.h"
+#include "vc2enc_new_dwt.h"
 #include "diractab.h"
 
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
@@ -38,6 +39,8 @@
 
 /* Decides the cutoff point in # of slices to distribute the leftover bytes */
 #define SLICE_REDIST_TOTAL 150
+
+#define NEW_TRANSFORMS 1
 
 typedef struct VC2BaseVideoFormat {
     enum AVPixelFormat pix_fmt;
@@ -103,6 +106,8 @@ typedef struct Plane {
     int dwt_width;
     int dwt_height;
     ptrdiff_t coef_stride;
+
+    struct VC2NewDWTPlane new_dwt_plane;
 } Plane;
 
 typedef struct SliceArgs {
@@ -184,6 +189,8 @@ typedef struct VC2EncContext {
     /* Parse code state */
     uint32_t next_parse_offset;
     enum DiracParseCodes last_parse_code;
+
+    struct VC2NewDWTContext new_dwt_ctx[3];
 } VC2EncContext;
 
 static av_always_inline void put_vc2_ue_uint(PutBitContext *pb, uint32_t val)
@@ -1068,7 +1075,12 @@ static av_cold int vc2_encode_end(AVCodecContext *avctx)
 
     for (i = 0; i < 3; i++) {
         ff_vc2enc_free_transforms(&s->transform_args[i].t);
+#if NEW_TRANSFORMS
+        av_freep(&s->plane[i].new_dwt_plane.buf_base);
+        av_freep(&s->plane[i].new_dwt_plane.tmp);
+#else
         av_freep(&s->plane[i].coef_buf);
+#endif
     }
 
     av_freep(&s->slice_args);
@@ -1190,7 +1202,17 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->dwt_width  = w = FFALIGN(p->width,  (1 << s->wavelet_depth));
         p->dwt_height = h = FFALIGN(p->height, (1 << s->wavelet_depth));
         p->coef_stride = FFALIGN(p->dwt_width, 32);
-        p->coef_buf = av_mallocz(p->coef_stride*p->dwt_height*sizeof(dwtcoef));
+        p->coef_buf = av_mallocz(p->coef_stride
+                * (p->dwt_height + (2 << s->wavelet_depth))
+                * sizeof(dwtcoef));
+#if NEW_TRANSFORMS
+        p->new_dwt_plane.buf_base = p->coef_buf;
+        p->coef_buf += (1 << s->wavelet_depth) * p->coef_stride;
+        p->new_dwt_plane.buf = p->coef_buf;
+        p->new_dwt_plane.tmp = av_mallocz((p->dwt_width + 16) * sizeof(dwtcoef));
+        if (!p->new_dwt_plane.tmp)
+            goto alloc_fail;
+#endif
         if (!p->coef_buf)
             goto alloc_fail;
         for (level = s->wavelet_depth-1; level >= 0; level--) {
