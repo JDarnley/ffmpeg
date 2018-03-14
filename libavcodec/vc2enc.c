@@ -883,53 +883,62 @@ static int encode_slices(VC2EncContext *s)
  * of levels. The rest of the areas can be thought as the details needed
  * to restore the image perfectly to its original size.
  */
+
+static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
+        ptrdiff_t pixel_stride, ptrdiff_t coeff_stride,
+        int width, int height, int bytes_per_pixel, dwtcoef diff_offset)
+{
+    int x, y;
+
+    if (bytes_per_pixel == 1) {
+        const uint8_t *pix = (const uint8_t *)pixels;
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++)
+                coeffs[x] = pix[x] - diff_offset;
+            coeffs += coeff_stride;
+            pix += pixel_stride;
+        }
+    } else {
+        const uint16_t *pix = (const uint16_t *)pixels;
+        pixel_stride /= 2;
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++)
+                coeffs[x] = pix[x] - diff_offset;
+            coeffs += coeff_stride;
+            pix += pixel_stride;
+        }
+    }
+}
+
 static int dwt_plane(AVCodecContext *avctx, void *arg)
 {
     TransformArgs *transform_dat = arg;
     VC2EncContext *s = transform_dat->ctx;
     const void *frame_data = transform_dat->idata;
-    const ptrdiff_t linesize = transform_dat->istride;
     const int field = transform_dat->field;
     const Plane *p = transform_dat->plane;
     VC2TransformContext *t = &transform_dat->t;
-    dwtcoef *buf = p->coef_buf;
     const int idx = s->wavelet_idx;
-    const int skip = 1 + s->interlaced;
 
-    int x, y, level, offset;
-    ptrdiff_t pix_stride = linesize >> (s->bpp - 1);
+    ptrdiff_t linesize = transform_dat->istride;
+    int level, offset;
 
     if (field == 1) {
         offset = 0;
-        pix_stride <<= 1;
+        linesize <<= 1;
     } else if (field == 2) {
-        offset = pix_stride;
-        pix_stride <<= 1;
+        offset = linesize;
+        linesize <<= 1;
     } else {
         offset = 0;
     }
 
-    if (s->bpp == 1) {
-        const uint8_t *pix = (const uint8_t *)frame_data + offset;
-        for (y = 0; y < p->height*skip; y+=skip) {
-            for (x = 0; x < p->width; x++) {
-                buf[x] = pix[x] - s->diff_offset;
-            }
-            buf += p->coef_stride;
-            pix += pix_stride;
-        }
-    } else {
-        const uint16_t *pix = (const uint16_t *)frame_data + offset;
-        for (y = 0; y < p->height*skip; y+=skip) {
-            for (x = 0; x < p->width; x++) {
-                buf[x] = pix[x] - s->diff_offset;
-            }
-            buf += p->coef_stride;
-            pix += pix_stride;
-        }
-    }
-
-    memset(buf, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
+    load_pixel_data((const uint8_t *)frame_data + offset, p->coef_buf,
+            linesize, p->coef_stride,
+            p->width, p->height, s->bpp, s->diff_offset);
+    memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 
     for (level = s->wavelet_depth-1; level >= 0; level--) {
         const SubBand *b = &p->band[level][0];
