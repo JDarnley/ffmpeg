@@ -928,16 +928,12 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     TransformArgs *ta      = &s->transform_args[i_plane];
     SliceArgs *slice       = &s->slice_args[i_slice];
     Plane *p               = &s->plane[i_plane];
-    const AVFrame *frame   = ta->frame;
     VC2TransformContext *t = &ta->t;
     const int idx          = s->wavelet_idx;
-    const int skip         = 1;
 
     int w = p->slice_w, h = p->slice_h;
     int x = slice->x,   y = slice->y;
 
-    /* pixel frame stride is in bytes but sample size is needed */
-    ptrdiff_t pixel_stride = frame->linesize[i_plane] >> (s->bpp - 1);
     /* coeff stride is in number of values */
     ptrdiff_t coeff_stride = p->coef_stride;
 
@@ -948,31 +944,6 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     /* Skip over whole slices worth of samples to get to unused area of buffer. */
     dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
-    ptrdiff_t offset = x*w;
-
-    /* Copy and convert unsigned to signed using s->diff_offset */
-    if (s->bpp == 1) {
-        dwtcoef *buf = coeff_data;
-        const uint8_t *pix = (const uint8_t *)frame->data[i_plane] + offset;
-        for (int y = 0; y < h*skip; y+=skip) {
-            for (int x = 0; x < w; x++) {
-                buf[x] = pix[x] - s->diff_offset;
-            }
-            buf += coeff_stride;
-            pix += pixel_stride;
-        }
-    } else {
-        dwtcoef *buf = coeff_data;
-        const uint16_t *pix = (const uint16_t *)frame->data[i_plane] + offset;
-        for (int y = 0; y < h*skip; y+=skip) {
-            for (int x = 0; x < w; x++) {
-                buf[x] = pix[x] - s->diff_offset;
-            }
-            buf += coeff_stride;
-            pix += pixel_stride;
-        }
-    }
-
     for (int level = s->wavelet_depth-1; level >= 0; level--) {
         SubBand *b = &p->band[level][0];
         w >>= 1;
@@ -982,6 +953,34 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     }
 
     return 0;
+}
+
+static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
+        ptrdiff_t pixel_stride, ptrdiff_t coeff_stride,
+        int width, int height, int bytes_per_pixel, dwtcoef diff_offset)
+{
+    int x, y;
+
+    if (bytes_per_pixel == 1) {
+        const uint8_t *pix = (const uint8_t *)pixels;
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++)
+                coeffs[x] = pix[x] - diff_offset;
+            coeffs += coeff_stride;
+            pix += pixel_stride;
+        }
+    } else {
+        const uint16_t *pix = (const uint16_t *)pixels;
+        pixel_stride /= 2;
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++)
+                coeffs[x] = pix[x] - diff_offset;
+            coeffs += coeff_stride;
+            pix += pixel_stride;
+        }
+    }
 }
 
 /**
@@ -1005,6 +1004,15 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     /* Threaded DWT transform */
     for (i = 0; i < 3; i++) {
         Plane *p = &s->plane[i];
+        int chroma_y_shift = i ? s->chroma_y_shift : 0;
+        int height = frame->height >> chroma_y_shift;
+        int pos_y = frame->pos_y >> chroma_y_shift;
+
+        /* TODO thread this call */
+        load_pixel_data(frame->data[i], p->coef_buf + pos_y*p->coef_stride,
+                frame->linesize[i], p->coef_stride,
+                p->width, height, s->bpp, s->diff_offset);
+
         s->transform_args[i].ctx   = s;
         s->transform_args[i].plane = p;
         s->transform_args[i].frame = frame;
