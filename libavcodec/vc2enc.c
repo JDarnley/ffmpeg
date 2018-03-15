@@ -163,6 +163,7 @@ typedef struct VC2EncContext {
     int num_x; /* #slices horizontally */
     int num_y; /* #slices vertically */
     int num_y_partial;
+    int slice_y_offset;
     int prefix_bytes;
     int size_scaler;
     int chroma_x_shift;
@@ -947,7 +948,7 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
     /* Skip over whole slices worth of samples to get to unused area of buffer. */
     dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
 
-    ptrdiff_t offset = x*w + y*h*pixel_stride;
+    ptrdiff_t offset = x*w;
 
     /* Copy and convert unsigned to signed using s->diff_offset */
     if (s->bpp == 1) {
@@ -994,9 +995,12 @@ static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int thr
 static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                         const char *aux_data, const int header_size, int field)
 {
-    int i, ret;
+    int i, x, y, ret;
     int64_t max_frame_bytes;
-    int y = frame->pos_y / s->slice_height;
+
+    for (y = 0; y < s->num_y_partial; y++)
+        for (x = 0; x < s->num_x; x++)
+            s->slice_args[y*s->num_x + x].y = y + s->slice_y_offset;
 
     /* Threaded DWT transform */
     for (i = 0; i < 3; i++) {
@@ -1061,9 +1065,9 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                 write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
             encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
             if (s->fragment_size == 1)
-                encode_fragment_header(s, arg->bytes, s->fragment_size, x, y);
+                encode_fragment_header(s, arg->bytes, s->fragment_size, x, s->slice_y_offset);
             else
-                encode_fragment_header(s, 0, s->fragment_size, x, y);
+                encode_fragment_header(s, 0, s->fragment_size, x, s->slice_y_offset);
             avpriv_align_put_bits(&s->pb);
         }
 
@@ -1108,7 +1112,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     int64_t r_bitrate = avctx->bit_rate >> (s->interlaced);
 
     if (frame->width != s->plane[0].width
-            || frame->height % s->plane[0].slice_h) {
+            || frame->height != s->plane[0].slice_h) {
         av_log(avctx, AV_LOG_ERROR, "given picture size (%dx%d) is not rows of slices (%dx%d)\n",
               frame->width, frame->height, s->plane[0].width, s->plane[0].slice_h);
         return AVERROR(EINVAL);
@@ -1123,6 +1127,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     s->avctx = avctx;
     s->prev_parse_info_position = -1;
     s->num_y_partial = frame->height / s->slice_height;
+    s->slice_y_offset = frame->pos_y / s->slice_height;
 
     if (!frame->pos_y) {
         s->size_scaler = 2;
