@@ -924,7 +924,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
     VC2EncContext *s = transform_dat->ctx;
     const void *frame_data = transform_dat->idata;
     const int field = transform_dat->field;
-    const Plane *p = transform_dat->plane;
+    Plane *p = transform_dat->plane;
     VC2TransformContext *t = &transform_dat->t;
     const enum VC2TransformType idx = s->wavelet_idx;
 
@@ -949,11 +949,17 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
     }
     memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 
+#if NEW_TRANSFORMS
+    ff_vc2enc_new_dwt_reset(&p->new_dwt_ctx, &p->new_dwt_plane, idx, s->wavelet_depth);
+    for (y = 0; y < p->height; y += 16)
+        ff_vc2enc_new_dwt_transform(&p->new_dwt_ctx, y+16);
+#else
     for (level = s->wavelet_depth-1; level >= 0; level--) {
         const SubBand *b = &p->band[level][0];
         t->vc2_subband_dwt[idx](t, p->coef_buf, b->stride >> 1,
                                 b->width, b->height, b->hstride >> 1);
     }
+#endif
 
     return 0;
 }
@@ -1205,6 +1211,9 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                 * (p->dwt_height + (2 << s->wavelet_depth))
                 * sizeof(dwtcoef));
 #if NEW_TRANSFORMS
+        p->new_dwt_plane.width = w;
+        p->new_dwt_plane.height = h;
+        p->new_dwt_plane.stride = p->coef_stride;
         p->new_dwt_plane.buf_base = p->coef_buf;
         p->coef_buf += (1 << s->wavelet_depth) * p->coef_stride;
         p->new_dwt_plane.buf = p->coef_buf;

@@ -54,4 +54,6 @@ struct VC2NewDWTContext {
 int ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p,
         enum VC2TransformType type, int decomposition_count);
 
+void ff_vc2enc_new_dwt_transform(struct VC2NewDWTContext *d, int y);
+
 #endif /* AVCODEC_VC2ENC_NEW_DWT_H */
