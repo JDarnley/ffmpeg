@@ -107,6 +107,7 @@ typedef struct Plane {
     int dwt_height;
     ptrdiff_t coef_stride;
 
+    struct VC2NewDWTContext new_dwt_ctx;
     struct VC2NewDWTPlane new_dwt_plane;
 } Plane;
 
@@ -178,7 +179,7 @@ typedef struct VC2EncContext {
 
     /* Options */
     double tolerance;
-    int wavelet_idx;
+    enum VC2TransformType wavelet_idx;
     int wavelet_depth;
     int strict_compliance;
     int slice_height;
@@ -189,8 +190,6 @@ typedef struct VC2EncContext {
     /* Parse code state */
     uint32_t next_parse_offset;
     enum DiracParseCodes last_parse_code;
-
-    struct VC2NewDWTContext new_dwt_ctx[3];
 } VC2EncContext;
 
 static av_always_inline void put_vc2_ue_uint(PutBitContext *pb, uint32_t val)
@@ -927,7 +926,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
     const int field = transform_dat->field;
     const Plane *p = transform_dat->plane;
     VC2TransformContext *t = &transform_dat->t;
-    const int idx = s->wavelet_idx;
+    const enum VC2TransformType idx = s->wavelet_idx;
 
     ptrdiff_t linesize = transform_dat->istride;
     int level, offset, y;
@@ -1209,7 +1208,9 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->new_dwt_plane.buf_base = p->coef_buf;
         p->coef_buf += (1 << s->wavelet_depth) * p->coef_stride;
         p->new_dwt_plane.buf = p->coef_buf;
-        p->new_dwt_plane.tmp = av_mallocz((p->dwt_width + 16) * sizeof(dwtcoef));
+        p->new_dwt_plane.tmp = av_mallocz((p->dwt_width + 16)
+                * MAX_DWT_SUPPORT
+                * sizeof(dwtcoef));
         if (!p->new_dwt_plane.tmp)
             goto alloc_fail;
 #endif

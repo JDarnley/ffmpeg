@@ -53,7 +53,7 @@ int ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p
     switch(type) {
         case VC2_TRANSFORM_HAAR:
         case VC2_TRANSFORM_HAAR_S:
-            d->support = 1;
+            d->support = 1; /* Why is this 1? */
         break;
 
         default:
