@@ -27,6 +27,7 @@
 #include "version.h"
 
 #include "vc2enc_dwt.h"
+#include "vc2enc_new_dwt.h"
 #include "diractab.h"
 
 #define NEW_SLICES 1
@@ -108,6 +109,9 @@ typedef struct Plane {
     ptrdiff_t coef_stride;
     int slice_w, slice_h;
     int align_w, align_h;
+
+    struct VC2NewDWTContext new_dwt_ctx;
+    struct VC2NewDWTPlane new_dwt_plane;
 } Plane;
 
 typedef struct SliceArgs {
@@ -1198,7 +1202,8 @@ static av_cold int vc2_encode_end(AVCodecContext *avctx)
 
     for (i = 0; i < 3; i++) {
         ff_vc2enc_free_transforms(&s->transform_args[i].t);
-        av_freep(&s->plane[i].coef_buf);
+        av_freep(&s->plane[i].new_dwt_plane.buf_base);
+        av_freep(&s->plane[i].new_dwt_plane.tmp);
     }
 
     av_freep(&s->slice_args);
@@ -1373,8 +1378,10 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->align_w    = w;
         p->align_h    = h;
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
-        p->coef_buf = av_mallocz(w*h*sizeof(dwtcoef));
-        if (!p->coef_buf)
+        p->new_dwt_plane.buf_base = av_mallocz(w * (h + 2*alignment) * sizeof(dwtcoef));
+        p->new_dwt_plane.buf = p->coef_buf = p->new_dwt_plane.buf_base + alignment * p->coef_stride;
+        p->new_dwt_plane.tmp = av_mallocz((p->dwt_width + 16) * MAX_DWT_SUPPORT * sizeof(dwtcoef));
+        if (!p->coef_buf || !p->new_dwt_plane.tmp)
             goto alloc_fail;
         /* DWT init */
         if (ff_vc2enc_init_transforms(&s->transform_args[i].t, w, h, slice_w, slice_h))
