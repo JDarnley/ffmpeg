@@ -31,7 +31,7 @@
 #include "diractab.h"
 
 #define NEW_SLICES 1
-#define THREADED_TRANSFORM 1
+#define THREADED_TRANSFORM 0
 
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
@@ -987,6 +987,26 @@ static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
     }
 }
 
+static int load_transform_plane(AVCodecContext *avctx, void *_arg, int jobnr, int threadnr)
+{
+    TransformArgs *arg = _arg;
+    VC2EncContext *s = arg->ctx;
+    Plane *p = arg->plane;
+    const AVFrame *frame = arg->frame;
+    const uint8_t *pixel_data = frame->data[jobnr];
+    dwtcoef *coeff_data = p->coef_buf;
+    ptrdiff_t pixel_stride = frame->linesize[jobnr];
+    ptrdiff_t coeff_stride = p->coef_stride;
+
+    int chroma_y_shift = jobnr ? s->chroma_y_shift : 0;
+    int height = frame->height >> chroma_y_shift;
+    int pos_y = frame->pos_y >> chroma_y_shift;
+
+    ff_vc2enc_new_dwt_transform(&p->new_dwt_ctx, pos_y + height);
+
+    return 0;
+}
+
 /**
  * Dirac Specification ->
  * 9.6 Parse Info Header Syntax. parse_info()
@@ -1020,13 +1040,15 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         s->transform_args[i].ctx   = s;
         s->transform_args[i].plane = p;
         s->transform_args[i].frame = frame;
+
+        if (frame->pos_y == 0)
+            ff_vc2enc_new_dwt_reset(&p->new_dwt_ctx, &p->new_dwt_plane, s->wavelet_idx, s->wavelet_depth);
     }
 #if THREADED_TRANSFORM
-    s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
-            s->num_y_partial*s->num_x*3);
+    s->avctx->execute2(s->avctx, load_transform_plane, s->transform_args, NULL, 3);
 #else
-    for (i = 0; i < s->num_y_partial*s->num_x*3; i++)
-        dwt_slice(s->avctx, NULL, i, 0);
+    for (i = 0; i < 3; i++)
+        load_transform_plane(s->avctx, &s->transform_args[i], i, 0);
 #endif
 
     max_frame_bytes = header_size + calc_slice_sizes(s)
@@ -1368,12 +1390,15 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->dwt_height = h;
         p->slice_w    = slice_w;
         p->slice_h    = slice_h;
+        p->new_dwt_plane.width = w;
+        p->new_dwt_plane.height = h;
 
         w             = FFALIGN(w, slice_w);
         h             = FFALIGN(h, slice_h);
         p->align_w    = w;
         p->align_h    = h;
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
+        p->new_dwt_plane.stride = p->coef_stride;
         p->new_dwt_plane.buf_base = av_mallocz(w * (h + 2*alignment) * sizeof(dwtcoef));
         p->new_dwt_plane.buf = p->coef_buf = p->new_dwt_plane.buf_base + alignment * p->coef_stride;
         p->new_dwt_plane.tmp = av_mallocz((p->dwt_width + 16) * MAX_DWT_SUPPORT * sizeof(dwtcoef));
