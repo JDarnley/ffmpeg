@@ -1101,7 +1101,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     int64_t r_bitrate = avctx->bit_rate >> (s->interlaced);
 
     if (frame->width != s->plane[0].width
-            || frame->height % s->plane[0].slice_h) {
+            || frame->height != s->plane[0].slice_h) {
         av_log(avctx, AV_LOG_ERROR, "given picture size (%dx%d) is not rows of slices (%dx%d)\n",
               frame->width, frame->height, s->plane[0].width, s->plane[0].slice_h);
         return AVERROR(EINVAL);
