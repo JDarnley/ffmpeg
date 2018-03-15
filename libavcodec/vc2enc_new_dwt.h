@@ -40,6 +40,8 @@ struct VC2NewDWTPlane {
 };
 
 struct VC2NewDWTContext {
+    void (*compose)(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs,
+            int width, int height, ptrdiff_t stride, ptrdiff_t hstride);
     dwtcoef *buffer;
     dwtcoef *temp;
     ptrdiff_t stride;

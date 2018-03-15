@@ -33,19 +33,7 @@ static inline void haar_horizontal_compose(dwtcoef *line, dwtcoef *temp,
     }
 }
 
-static void haar_shift_horizontal_compose(dwtcoef *line, dwtcoef *temp,
-        int width, ptrdiff_t stride)
-{
-    haar_horizontal_compose(line, temp, width, stride, 1);
-}
-
-static void haar_noshift_horizontal_compose(dwtcoef *line, dwtcoef *temp,
-        int width, ptrdiff_t stride)
-{
-    haar_horizontal_compose(line, temp, width, stride, 0);
-}
-
-static void haar_vertical_compose(dwtcoef *line0, dwtcoef *line1,
+static inline void haar_vertical_compose(dwtcoef *line0, dwtcoef *line1,
         dwtcoef *temp0, dwtcoef *temp1,
         int width, ptrdiff_t stride)
 {
@@ -56,8 +44,8 @@ static void haar_vertical_compose(dwtcoef *line0, dwtcoef *line1,
     }
 }
 
-static void haar_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs,
-        int width, int height, ptrdiff_t stride, ptrdiff_t hstride)
+static inline void haar_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs,
+        int width, int height, ptrdiff_t stride, ptrdiff_t hstride, int shift)
 {
     int y = cs->y;
     dwtcoef *b0 = d->buffer + (y-1)*stride;
@@ -65,11 +53,23 @@ static void haar_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs
     dwtcoef *t0 = d->temp;
     dwtcoef *t1 = d->temp + width;
 
-    haar_shift_horizontal_compose(b0, t0, width, stride);
-    haar_shift_horizontal_compose(b1, t1, width, stride);
+    haar_horizontal_compose(b0, t0, width, stride, shift);
+    haar_horizontal_compose(b1, t1, width, stride, shift);
     haar_vertical_compose(b0, b1, t0, t1, width, stride);
 
     cs->y += 2;
+}
+
+static void haar_shift_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs,
+        int width, int height, ptrdiff_t stride, ptrdiff_t hstride)
+{
+    haar_compose(d, cs, width, height, stride, hstride, 1);
+}
+
+static void haar_noshift_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs,
+        int width, int height, ptrdiff_t stride, ptrdiff_t hstride)
+{
+    haar_compose(d, cs, width, height, stride, hstride, 0);
 }
 
 int ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p,
@@ -100,7 +100,12 @@ int ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p
 
     switch(type) {
         case VC2_TRANSFORM_HAAR:
+            d->compose = haar_noshift_compose;
+            d->support = 1; /* Why is this 1? */
+        break;
+
         case VC2_TRANSFORM_HAAR_S:
+            d->compose = haar_shift_compose;
             d->support = 1; /* Why is this 1? */
         break;
 
@@ -126,6 +131,6 @@ void ff_vc2enc_new_dwt_transform(struct VC2NewDWTContext *d, int y)
         int hstride_l = 1 << level;
 
         while(d->cs[level].y <= FFMIN((y >> level) + support, height_l))
-            haar_compose(d, &d->cs[level], width_l, height_l, stride_l, hstride_l);
+            d->compose(d, &d->cs[level], width_l, height_l, stride_l, hstride_l);
     }
 }
