@@ -920,6 +920,12 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
          */
 
         if (!s->is_fragment || (s->is_fragment && num_slices == 0)) {
+
+            /* To work around a problem that results in this never being reset,
+             * reset it here. */
+            /* Spec 14.3 part of initialize_fragment_state */
+            s->fragment_slices_received = 0;
+
             if (!s->field_coding) {
                 if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
                     return ret;
