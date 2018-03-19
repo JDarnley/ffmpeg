@@ -130,7 +130,11 @@ void ff_vc2enc_new_dwt_transform(struct VC2NewDWTContext *d, int y)
         int stride_l  = d->stride << level;
         int hstride_l = 1 << level;
 
-        while(d->cs[level].y <= FFMIN((y >> level) + support, height_l))
+        /* Why was this "less than or equal to"?  I think the Y value says how
+         * many lines you *coud* transform.  For example with haar with
+         * wavelet_depth 1: pass in 8 and it should break the loop when
+         * VC2NewDWTCompose::y is 9 */
+        while(d->cs[level].y < FFMIN((y >> level) + support, height_l))
             d->compose(d, &d->cs[level], width_l, height_l, stride_l, hstride_l);
     }
 }
