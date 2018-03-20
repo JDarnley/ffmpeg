@@ -940,7 +940,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                 if (!s->cur_field) {
                     /* Some error may mean we have not released the previous
                      * frame/buffer we had.  Free one if it is still there. */
-                    if (s->prev_field->data[0])
+                    if (s->prev_field && s->prev_field->data[0])
                         av_frame_unref(s->prev_field);
 
                     if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
