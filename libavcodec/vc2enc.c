@@ -780,7 +780,7 @@ static int calc_slice_sizes(VC2EncContext *s)
         }
     }
 
-    bytes_left = s->frame_max_bytes - bytes_left;
+    bytes_left = (s->frame_max_bytes / s->num_y) - bytes_left;
 
     /* 2nd pass - uses the leftover bits and distributes them to the highest
      * costing slices to boost the quality. Not required, you can comment it
