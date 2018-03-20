@@ -1156,8 +1156,13 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
     s->expected_pos_y += frame->height;
     if (s->expected_pos_y >= avctx->height) {
+        int avg_quant = s->q_avg/s->slice_count;
         s->expected_pos_y = 0;
         s->picture_number++;
+
+        if (avg_quant >= 50)
+            av_log(avctx, AV_LOG_WARNING, "average quantizer very large: %i\n", avg_quant);
+        s->q_avg = s->slice_count = 0;
     }
 
     *got_packet = 1;
