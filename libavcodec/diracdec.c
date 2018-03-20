@@ -995,6 +995,15 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         if (s->is_fragment && !num_slices)
             return get_bits_count(&s->gb);
 
+        /* Some error, possibly caused by packet loss, leads to this state in
+         * the decoder.  The decoder gets here without a current_picture, enters
+         * dirac_decode_frame_internal, when all slices are available that calls
+         * idwt_plane which then segfaults because this pointer is NULL. */
+        if (!s->current_picture) {
+            av_log(avctx, AV_LOG_ERROR, "no current_picture\n");
+            return AVERROR_INVALIDDATA;
+        }
+
         /* [DIRAC_STD] 13.0 Transform data syntax. transform_data() */
         ret = dirac_decode_frame_internal(s);
         if (ret < 0) {
