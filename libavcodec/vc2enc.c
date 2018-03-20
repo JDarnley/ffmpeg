@@ -1125,11 +1125,11 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         /* bitrate(per second)/framerate */
         s->frame_max_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
                                         s->avctx->time_base.den) >> 3) - header_size;
-        /* preliminary max slice size (max_frame_bytes/number_of_slices) */
-        s->slice_max_bytes = slice_ceil = 1440
-                                        - 25 /* "BBCD and fragment headers */
-                                        - 16 /* RTP and ext headers */
-                                        ;
+        /* preliminary max slice size (frame_max_bytes/number_of_slices) */
+        s->slice_max_bytes = slice_ceil = FFMIN(
+                av_rescale(s->frame_max_bytes, 1, s->num_x * s->num_y),
+                1440 - 25 /* "BBCD and fragment headers */ - 16 /* RTP and ext headers */
+                );
 
         /* Find an appropriate size scaler */
         while (sig_size > 255) {
