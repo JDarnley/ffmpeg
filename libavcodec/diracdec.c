@@ -927,6 +927,11 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
             s->fragment_slices_received = 0;
 
             if (!s->field_coding) {
+                /* Some error may mean we have not released the previous
+                 * frame/buffer we had.  Free one if it is still there. */
+                if (pic && pic->data[0])
+                    av_frame_unref(pic);
+
                 if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
                     return ret;
                 av_log(avctx, AV_LOG_INFO, "allocated progressive buf\n");
