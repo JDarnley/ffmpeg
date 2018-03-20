@@ -920,7 +920,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
          */
 
         if (!s->is_fragment || (s->is_fragment && num_slices == 0)) {
-
             /* To work around a problem that results in this never being reset,
              * reset it here. */
             /* Spec 14.3 part of initialize_fragment_state */
@@ -971,9 +970,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                 s->prev_field->display_picture_number = pict_num;
                 s->current_picture = s->prev_field;
             }
-        }
 
-        if (!s->is_fragment || (s->is_fragment && num_slices == 0)) {
             /* because we didn't _read_ the fragment_data_length and
              * fragment_slice_count above we need to skip those 32-bits here. */
             if (s->is_fragment)
@@ -984,11 +981,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                 return ret;
             }
 
-            /* Spec 14.3 part of initialize_fragment_state */
-            s->fragment_slices_received = 0;
-        }
-
-        if (!s->is_fragment || (s->is_fragment && num_slices == 0)) {
             /* Will warn if the encoder's not fast enough or the decoder's not fast
             * enough or if a frame wasn't able to be decoded and was dropped */
             if (s->current_picture->display_picture_number &&
