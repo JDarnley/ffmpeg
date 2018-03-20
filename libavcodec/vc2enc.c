@@ -1098,7 +1098,6 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     const char *aux_data = bitexact ? "Lavc" : LIBAVCODEC_IDENT;
     const int aux_data_size = bitexact ? sizeof("Lavc") : sizeof(LIBAVCODEC_IDENT);
     const int header_size = 100 + aux_data_size;
-    int64_t r_bitrate = avctx->bit_rate >> (s->interlaced);
 
     if (frame->width != s->plane[0].width
             || frame->height != s->plane[0].slice_h) {
@@ -1123,7 +1122,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
         /* Rate control */
         /* bitrate(per second)/framerate */
-        s->frame_max_bytes = (av_rescale(r_bitrate, s->avctx->time_base.num,
+        s->frame_max_bytes = (av_rescale(avctx->bit_rate, s->avctx->time_base.num,
                                         s->avctx->time_base.den) >> 3) - header_size;
         /* preliminary max slice size (frame_max_bytes/number_of_slices) */
         s->slice_max_bytes = slice_ceil = FFMIN(
