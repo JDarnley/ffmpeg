@@ -28,8 +28,9 @@ static inline void haar_horizontal_compose(dwtcoef *line, dwtcoef *temp,
 {
     int x;
     for (x = 0; x < width; x += 2) {
-        temp[x+1] = (line[x+1] << shift) - (line[x] << shift);
-        temp[x]   = (line[x] << shift) + (temp[x+1] + 1 >> 1);
+        dwtcoef val = (line[x+1] << shift) - (line[x] << shift);
+        temp[x+1]   = val;
+        temp[x]     = (line[x] << shift) + (val + 1 >> 1);
     }
 }
 
@@ -39,8 +40,9 @@ static inline void haar_vertical_compose(dwtcoef *line0, dwtcoef *line1,
 {
     int x;
     for (x = 0; x < width; x++) {
-        line1[x] = temp1[x] - temp0[x];
-        line0[x] = temp0[x] + (line1[x] + 1 >> 1);
+        dwtcoef val = temp1[x] - temp0[x];
+        line1[x]    = val;
+        line0[x]    = temp0[x] + (val + 1 >> 1);
     }
 }
 
