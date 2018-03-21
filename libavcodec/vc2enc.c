@@ -30,8 +30,7 @@
 #include "vc2enc_new_dwt.h"
 #include "diractab.h"
 
-#define NEW_SLICES 1
-#define THREADED_TRANSFORM 0
+#define THREADED_TRANSFORM 1
 
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
@@ -989,7 +988,7 @@ static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
 
 static int load_transform_plane(AVCodecContext *avctx, void *_arg, int jobnr, int threadnr)
 {
-    TransformArgs *arg = _arg;
+    TransformArgs *arg = &((TransformArgs *)_arg)[jobnr];
     VC2EncContext *s = arg->ctx;
     Plane *p = arg->plane;
     const AVFrame *frame = arg->frame;
@@ -1048,7 +1047,7 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     s->avctx->execute2(s->avctx, load_transform_plane, s->transform_args, NULL, 3);
 #else
     for (i = 0; i < 3; i++)
-        load_transform_plane(s->avctx, &s->transform_args[i], i, 0);
+        load_transform_plane(s->avctx, s->transform_args, i, 0);
 #endif
 
     max_frame_bytes = header_size + calc_slice_sizes(s)
