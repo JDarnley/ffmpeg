@@ -1001,6 +1001,9 @@ static int load_transform_plane(AVCodecContext *avctx, void *_arg, int jobnr, in
     int height = frame->height >> chroma_y_shift;
     int pos_y = frame->pos_y >> chroma_y_shift;
 
+    load_pixel_data(pixel_data, coeff_data + pos_y*coeff_stride,
+            pixel_stride, coeff_stride,
+            p->width, height, s->bpp, s->diff_offset);
     ff_vc2enc_new_dwt_transform(&p->new_dwt_ctx, pos_y + height);
 
     return 0;
@@ -1027,15 +1030,6 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     /* Threaded DWT transform */
     for (i = 0; i < 3; i++) {
         Plane *p = &s->plane[i];
-        int chroma_y_shift = i ? s->chroma_y_shift : 0;
-        int height = frame->height >> chroma_y_shift;
-        int pos_y = frame->pos_y >> chroma_y_shift;
-
-        /* TODO thread this call */
-        load_pixel_data(frame->data[i], p->coef_buf + pos_y*p->coef_stride,
-                frame->linesize[i], p->coef_stride,
-                p->width, height, s->bpp, s->diff_offset);
-
         s->transform_args[i].ctx   = s;
         s->transform_args[i].plane = p;
         s->transform_args[i].frame = frame;
