@@ -45,7 +45,7 @@ static inline void haar_vertical_compose(dwtcoef *line0, dwtcoef *line1,
 }
 
 static inline void haar_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs,
-        int width, int height, ptrdiff_t stride, ptrdiff_t hstride, int shift)
+        int width, int height, ptrdiff_t stride, ptrdiff_t hstride, const int shift)
 {
     int y = cs->y;
     dwtcoef *b0 = d->buffer + (y-1)*stride;
