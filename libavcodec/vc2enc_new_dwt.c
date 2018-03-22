@@ -24,7 +24,7 @@
 #include "vc2enc_new_dwt.h"
 
 static inline void haar_horizontal_compose(dwtcoef *line, dwtcoef *temp,
-        int width, ptrdiff_t stride, const int shift)
+        int width, const int shift)
 {
     int x;
     for (x = 0; x < width; x += 2) {
@@ -55,8 +55,8 @@ static inline void haar_compose(struct VC2NewDWTContext *d, struct VC2NewDWTComp
     dwtcoef *t0 = d->temp;
     dwtcoef *t1 = d->temp + width;
 
-    haar_horizontal_compose(b0, t0, width, stride, shift);
-    haar_horizontal_compose(b1, t1, width, stride, shift);
+    haar_horizontal_compose(b0, t0, width, shift);
+    haar_horizontal_compose(b1, t1, width, shift);
     haar_vertical_compose(b0, b1, t0, t1, width, stride);
 
     cs->y += 2;
