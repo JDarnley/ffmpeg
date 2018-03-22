@@ -53,8 +53,11 @@ struct VC2NewDWTContext {
     struct VC2NewDWTCompose cs[MAX_DWT_LEVELS];
 };
 
-int ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p,
+int ff_vc2enc_new_dwt_init(void * logctx,
+        struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p,
         enum VC2TransformType type, int decomposition_count);
+
+void ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d);
 
 void ff_vc2enc_new_dwt_transform(struct VC2NewDWTContext *d, int y);
 

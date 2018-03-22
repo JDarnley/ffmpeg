@@ -74,10 +74,27 @@ static void haar_noshift_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCom
     haar_compose(d, cs, width, height, stride, hstride, 0);
 }
 
-int ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p,
-        enum VC2TransformType type, int decomposition_count)
+void ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d)
 {
     int level;
+
+    for (level = d->decomposition_count - 1; level >= 0; level--) {
+        int height_l = d->height >> level;
+        int stride_l = d->stride << level;
+
+        switch(d->type) {
+            case VC2_TRANSFORM_HAAR:
+            case VC2_TRANSFORM_HAAR_S:
+                d->cs[level].y = 1;
+                break;
+        }
+    }
+}
+
+int ff_vc2enc_new_dwt_init(void *logctx,
+        struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p,
+        enum VC2TransformType type, int decomposition_count)
+{
     int ret = 0;
 
     d->type = p->type = type;
@@ -88,35 +105,20 @@ int ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d, struct VC2NewDWTPlane *p
     d->temp   = p->tmp + 8;
     d->decomposition_count = decomposition_count;
 
-    for (level = d->decomposition_count - 1; level >= 0; level--) {
-        int height_l = d->height >> level;
-        int stride_l = d->stride << level;
-
-        switch(type) {
-            case VC2_TRANSFORM_HAAR:
-            case VC2_TRANSFORM_HAAR_S:
-                d->cs[level].y = 1;
-                break;
-        }
-    }
-
-    switch(type) {
+    switch (type) {
         case VC2_TRANSFORM_HAAR:
             d->compose = haar_noshift_compose;
             d->support = 1; /* Why is this 1? */
-        break;
+            break;
 
         case VC2_TRANSFORM_HAAR_S:
             d->compose = haar_shift_compose;
             d->support = 1; /* Why is this 1? */
-        break;
+            break;
 
         default:
+            av_log(logctx, AV_LOG_ERROR, "Unknown wavelet type %d\n", type);
             ret = AVERROR(EINVAL);
-    }
-
-    if (ret) {
-        av_log(NULL, AV_LOG_ERROR, "Unknown wavelet type %d\n", type);
     }
 
     return ret;
