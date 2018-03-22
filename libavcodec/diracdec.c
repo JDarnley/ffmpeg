@@ -1053,9 +1053,6 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         if (buf_idx + DATA_UNIT_HEADER_SIZE >= buf_size)
             break;
 
-        if (picture_element_present)
-            av_log(avctx, AV_LOG_INFO, "picture_element_present is true but more data in packet\n");
-
         data_unit_size = AV_RB32(buf+buf_idx+5);
         if (data_unit_size > buf_size - buf_idx) {
             av_log(avctx, AV_LOG_ERROR,
