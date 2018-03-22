@@ -23,6 +23,84 @@
 #include "vc2enc_dwt.h"
 #include "vc2enc_new_dwt.h"
 
+/* LeGall (5,3), VC2_TRANSFORM_5_3 */
+
+#define legall5_3_h_lift1(val0, val1, val2)\
+    ((val1) + ((val0) + (val2) + 2 >> 2))
+
+#define legall5_3_h_lift2(val0, val1, val2)\
+    ((val1) - ((val0) + (val2) + 1 >> 1))
+
+static inline void legall5_3_horizontal_compose(dwtcoef *line,
+        int width, ptrdiff_t stride)
+{
+    int x;
+    int w2 = width / 2;
+
+    /* TODO: should the extra shift-of-1 be done inline or separately? */
+    /* TODO: see if this is faster with some temporary variables. */
+
+    /* Lifting stage 2. */
+    for (x = 0; x < w2-1; x++)
+        line[2*x+1] = legall5_3_h_lift2(line[2*x] << 1, line[2*x+1] << 1, line[2*x+2] << 1);
+    line[width-1] = legall5_3_h_lift2(line[width-2] << 1, line[width-1] << 1, line[width-2] << 1);
+
+    /* Lifting stage 1. */
+    line[0] = legall5_3_h_lift1(line[1], line[0] << 1, line[1]);
+    for (x = 1; x < w2-1; x++)
+        line[2*x] = legall5_3_h_lift1(line[2*x-1], line[2*x] << 1, line[2*x+1]);
+    line[width-2] = legall5_3_h_lift1(line[width-3], line[width-2] << 1, line[width-1]);
+}
+
+static inline void legall5_3_vertical_compose1(/* dwtcoef *line0, dwtcoef *line1, dwtcoef *line2, */
+        dwtcoef *temp0, dwtcoef *temp1, dwtcoef *temp2
+        int width, ptrdiff_t stride)
+{
+    int x;
+    for (x = 0; x < width; x++)
+        temp1[x] = legall5_3_h_lift1(temp0[x], temp1[x], temp2[x]);
+}
+
+static inline void legall5_3_vertical_compose2(/* dwtcoef *line0, dwtcoef *line1, dwtcoef *line2, */
+        dwtcoef *temp0, dwtcoef *temp1, dwtcoef *temp2
+        int width, ptrdiff_t stride)
+{
+    int x;
+    for (x = 0; x < width; x++)
+        temp1[x] = legall5_3_h_lift2(temp0[x], temp1[x], temp2[x]);
+}
+
+static void legaal5_3_compose(struct VC2NewDWTContext *d, struct VC2NewDWTCompose *cs,
+        int width, int height, ptrdiff_t stride, ptrdiff_t hstride)
+{
+    int y = cs->y;
+    dwtcoef *line[4] = {
+        d->buffer + avpriv_mirror(y-1, height-1)*stride,
+        d->buffer,
+        d->buffer + avpriv_mirror(y+1, height-1)*stride,
+        d->buffer + avpriv_mirror(y+2, height-1)*stride,
+    };
+    dwtcoef *temp[4] = {
+        d->temp + 1*width,
+        d->temp,
+        d->temp + 1*width,
+        d->temp + 2*width,
+        d->temp + 3*width,
+    };
+
+    legall5_3_horizontal_compose(line[0], temp[1], width);
+    legall5_3_horizontal_compose(line[1], temp[2], width);
+    legall5_3_horizontal_compose(line[2], temp[3], width);
+    legall5_3_horizontal_compose(line[3], temp[4], width);
+
+    legall5_3_vertical_compose2(t[2], t[3], t[4]);
+    legall5_3_vertical_compose1(t[1], t[2], t[3]);
+
+    cs->y += 2;
+}
+
+/* Haar, with and without shift, VC2_TRANSFORM_HAAR, VC2_TRANSFORM_HAAR_S */
+
 static inline void haar_horizontal_compose(dwtcoef *line, dwtcoef *temp,
         int width, const int shift)
 {
@@ -83,6 +161,10 @@ void ff_vc2enc_new_dwt_reset(struct VC2NewDWTContext *d)
         int stride_l = d->stride << level;
 
         switch(d->type) {
+            case VC2_TRANSFORM_5_3:
+                d->cs[level].y = -1;
+                break;
+
             case VC2_TRANSFORM_HAAR:
             case VC2_TRANSFORM_HAAR_S:
                 d->cs[level].y = 1;
@@ -106,6 +188,11 @@ int ff_vc2enc_new_dwt_init(void *logctx,
     d->decomposition_count = decomposition_count;
 
     switch (type) {
+        case VC2_TRANSFORM_5_3:
+            d->compose = legaal5_3_compose;
+            d->support = 3;
+            break;
+
         case VC2_TRANSFORM_HAAR:
             d->compose = haar_noshift_compose;
             d->support = 1; /* Why is this 1? */
