@@ -208,8 +208,8 @@ static av_always_inline void dwt_haar(dwtcoef *data,
     }
 
     /* Vertical synthesis. */
-    for (x = 0; x < synth_width; x++) {
-        for (y = 0; y < synth_height; y += 2) {
+    for (y = 0; y < synth_height; y += 2) {
+        for (x = 0; x < synth_width; x++) {
             data[(y + 1)*stride + x*hstride] = data[(y + 1)*stride + x*hstride] -
                                                data[y*stride + x*hstride];
             data[y*stride + x*hstride] = data[y*stride + x*hstride] +
