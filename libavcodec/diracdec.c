@@ -90,6 +90,15 @@ typedef struct DiracSlice {
     int bytes;
 } DiracSlice;
 
+typedef struct DiracFragment {
+    DiracSlice *slices;
+    const uint8_t *data;
+    uint16_t data_length;
+    uint16_t slice_count;
+    uint16_t x_offset;
+    uint16_t y_offset;
+} DiracFragment;
+
 typedef struct DiracContext {
     AVCodecContext *avctx;
     DiracDSPContext diracdsp;
@@ -118,6 +127,9 @@ typedef struct DiracContext {
 
     DiracSlice *slice_params_buf;
     int slice_params_num_buf;
+
+    DiracFragment *fragments;
+    int num_fragments;
 
     /* fragments */
     int is_fragment;
@@ -209,6 +221,9 @@ static av_cold int dirac_decode_init(AVCodecContext *avctx)
     s->slice_params_buf = NULL;
     s->slice_params_num_buf = -1;
 
+    s->fragments = NULL;
+    s->num_fragments = -1;
+
     s->cached_picture = av_frame_alloc();
 
     ret = ff_thread_once(&dirac_arith_init, ff_dirac_init_arith_tables);
@@ -235,6 +250,7 @@ static av_cold int dirac_decode_end(AVCodecContext *avctx)
 
     av_freep(&s->thread_buf);
     av_freep(&s->slice_params_buf);
+    av_freep(&s->fragments);
 
     av_frame_free(&s->cached_picture);
 
@@ -377,6 +393,15 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
     return 0;
 }
 
+static int decode_hq_slice_single_wrap(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
+{
+    DiracContext *s = avctx->priv_data;
+    DiracSlice *slice = ((DiracSlice *)arg) + jobnr;
+    uint8_t *thread_buf = &s->thread_buf[s->thread_buf_size*threadnr];
+    decode_hq_slice(s, slice, thread_buf); //TODO: use returned error code
+    return 0;
+}
+
 /**
  * Dirac Specification ->
  * 13.5.1 low_delay_transform_data()
@@ -384,7 +409,7 @@ static int decode_hq_slice_row(AVCodecContext *avctx, void *arg, int jobnr, int 
 static int decode_lowdelay(DiracContext *s)
 {
     AVCodecContext *avctx = s->avctx;
-    int i, slice_x, slice_y, bufsize, coef_buf_size, slice_num = 0, fragment_data_len, x_offset, y_offset, slice;
+    int i, slice_x, slice_y, bufsize, coef_buf_size, slice_num = 0, x_offset, y_offset;
     int64_t bytes = 0;
     const uint8_t *buf;
     DiracSlice *slices;
@@ -429,63 +454,146 @@ static int decode_lowdelay(DiracContext *s)
     bufsize = get_bits_left(&s->gb);
 
     if (s->is_fragment) {
-        fragment_data_len = get_bits_long(&s->gb, 16);
-        if (fragment_data_len > bufsize) {
-            av_log(s->avctx, AV_LOG_ERROR, "invalid fragment data length \n");
-            return AVERROR_INVALIDDATA;
-        }
+        int num_fragments = 0;
+        int first = 1;
 
-        slice_num = get_bits_long(&s->gb, 16);
-        x_offset = get_bits_long(&s->gb, 16);
-        y_offset = get_bits_long(&s->gb, 16);
+        /* count the number of fragments */
+        while(bytes < bufsize / 8) {
+            const uint8_t *pos = &buf[bytes];
 
-        if (!slice_num || s->fragment_slices_received + slice_num > s->num_x*s->num_y) {
-            av_log(s->avctx, AV_LOG_ERROR, "invalid number of slices (%d || %d + %d > %d*%d), offset: %d,%d\n",
-                    slice_num, s->fragment_slices_received, slice_num, s->num_x, s->num_y, x_offset, y_offset);
-            //if (s->fragment_slices_received == (s->num_x * s->num_y))
-                //abort();
-            return AVERROR_INVALIDDATA;
-        }
+            int fragment_data_len;
 
-        if (x_offset >= s->num_x || y_offset >= s->num_y) {
-            av_log(s->avctx, AV_LOG_ERROR, "fragment slice offset (%d,%d) is invalid for slice dimensions (%dx%d)\n",
-                    x_offset, y_offset, s->num_x, s->num_y);
-            return AVERROR_INVALIDDATA;
-        }
-
-        /* byte_align and update buffer position before fragment_data */
-        align_get_bits(&s->gb);
-        buf = s->gb.buffer + get_bits_count(&s->gb)/8;
-        bufsize = get_bits_left(&s->gb);
-
-        for (slice = 0; slice < slice_num; slice++) {
-            bytes = s->prefix_bytes + 1;
-            for (i = 0; i < 3; i++) {
-                if (bytes <= bufsize/8)
-                    bytes += buf[bytes] * s->size_scaler + 1;
+            /* First BBCD header was read by the parse loop */
+            if (!first) {
+                bytes += 13 + 4;
+                pos = &buf[bytes];
             }
-            if (bytes >= INT_MAX || bytes*8 > bufsize) {
-                /* TODO: improve message */
-                av_log(s->avctx, AV_LOG_ERROR, "too many bytes (%"PRId64" > %"PRId64" || %"PRId64" > %"PRId64"), size_scaler: %"PRIu64"\n",
-                        bytes, (int64_t)INT_MAX, bytes*8, (int64_t)bufsize, s->size_scaler);
+
+            fragment_data_len = AV_RB16(&pos[0]);
+            if (fragment_data_len > bufsize) {
+                av_log(s->avctx, AV_LOG_ERROR, "invalid fragment data length \n");
                 return AVERROR_INVALIDDATA;
             }
 
-            slices[slice].bytes   = bytes;
-            slices[slice].slice_x = (y_offset*s->num_x + x_offset + slice) % s->num_x;
-            slices[slice].slice_y = (y_offset*s->num_x + x_offset + slice) / s->num_x;
-            /* Sets all the arguments and get bit contexts to the right addresses */
-            init_get_bits(&slices[slice].gb, buf, bufsize);
+            slice_num = AV_RB16(&pos[2]);
+            assert(slice_num != 0);
+            if (slice_num) {
+                x_offset = AV_RB16(&pos[4]);
+                y_offset = AV_RB16(&pos[6]);
+            }
 
-            buf += bytes;
-            if (bufsize/8 >= bytes)
-                bufsize -= bytes*8;
-            else
-                bufsize = 0;
+            if (!slice_num || s->fragment_slices_received + slice_num > s->num_x*s->num_y) {
+                av_log(s->avctx, AV_LOG_ERROR, "invalid number of slices (%d || %d + %d > %d*%d), offset: %d,%d\n",
+                        slice_num, s->fragment_slices_received, slice_num, s->num_x, s->num_y, x_offset, y_offset);
+                //if (s->fragment_slices_received == (s->num_x * s->num_y))
+                    //abort();
+                return AVERROR_INVALIDDATA;
+            }
 
-            decode_hq_slice(s, &slices[slice], s->thread_buf); //TODO: use returned error code
+            if (x_offset >= s->num_x || y_offset >= s->num_y) {
+                av_log(s->avctx, AV_LOG_ERROR, "fragment slice offset (%d,%d) is invalid for slice dimensions (%dx%d)\n",
+                        x_offset, y_offset, s->num_x, s->num_y);
+                return AVERROR_INVALIDDATA;
+            }
+
+            first = 0;
+            num_fragments++;
+            bytes += fragment_data_len + 8;
+
+            s->fragment_slices_received += slice_num;
+
+            /* Next section does not look like a fragment. */
+            if (AV_RB32(&buf[bytes]) != DIRAC_PCODE_MAGIC
+                    || buf[bytes+4] != DIRAC_PCODE_PICTURE_FRAGMENT_HQ)
+                break;
+
         }
-        s->fragment_slices_received += slice_num;
+
+        /* Indicate how much data we have consumed. */
+        skip_bits_long(&s->gb, bytes*8);
+
+        // allocate array number of fragments in buffer
+        if (s->num_fragments != num_fragments) {
+            s->fragments = av_realloc_f(s->fragments, num_fragments, sizeof(DiracFragment));
+            if (!s->thread_buf) {
+                av_log(s->avctx, AV_LOG_ERROR, "fragment buffer allocation failure\n");
+                s->num_fragments = 0;
+                return AVERROR(ENOMEM);
+            }
+            s->num_fragments = num_fragments;
+        }
+
+        first = 1;
+        bytes = 0;
+        slice_num = 0;
+        /* Parse fragments and fill out DiracFragment structs. */
+        for (i = 0; i < num_fragments; i++) {
+            const uint8_t *pos = &buf[bytes];
+            DiracFragment *frag = &s->fragments[i];
+
+            /* First BBCD header was read by the parse loop */
+            if (!first) {
+                bytes += 13 + 4;
+                pos = &buf[bytes];
+            }
+
+            frag->data_length = AV_RB16(&pos[0]);
+            frag->slice_count = AV_RB16(&pos[2]);
+            frag->x_offset = AV_RB16(&pos[4]);
+            frag->y_offset = AV_RB16(&pos[6]);
+            frag->slices = &s->slice_params_buf[slice_num];
+            frag->data = &pos[8];
+
+            bytes += frag->data_length + 8;
+            slice_num += frag->slice_count;
+            first = 0;
+        }
+
+        bytes = 0;
+        slice_num = 0;
+        /* Use DiracFragment structs to init_get_bits. */
+        for (i = 0; i < num_fragments; i++) {
+            DiracFragment *frag = &s->fragments[i];
+            const uint8_t *buf = frag->data;
+            int64_t bufsize = frag->data_length * 8;
+
+            int j;
+            for (j = 0; j < frag->slice_count; j++) {
+                int64_t bytes = s->prefix_bytes + 1;
+                int p;
+                for (p = 0; p < 3; p++) {
+                    if (bytes <= bufsize/8)
+                        bytes += buf[bytes] * s->size_scaler + 1;
+                }
+                if (bytes >= INT_MAX || bytes*8 > bufsize) {
+                    av_log(s->avctx, AV_LOG_ERROR, "too many bytes\n");
+                    return AVERROR_INVALIDDATA;
+                }
+
+                slices[slice_num].bytes   = bytes;
+                slices[slice_num].slice_x = (frag->y_offset*s->num_x + frag->x_offset + j) % s->num_x;
+                slices[slice_num].slice_y = (frag->y_offset*s->num_x + frag->x_offset + j) / s->num_x;
+                /* Sets all the arguments and get bit contexts to the right addresses */
+                init_get_bits(&slices[slice_num].gb, buf, bufsize);
+                slice_num++;
+
+                buf += bytes;
+                if (bufsize/8 >= bytes)
+                    bufsize -= bytes*8;
+                else
+                    bufsize = 0;
+            }
+        }
+
+        /* check whether we have a whole number of rows */
+        if (slice_num % s->num_x == 0) {
+            /* Runs decode_hq_slice_row to decode the slices in a row per thread */
+            avctx->execute2(avctx, decode_hq_slice_row, slices, NULL, slice_num / s->num_x);
+        } else {
+            /* Throw threads at all the slices */
+            avctx->execute2(avctx, decode_hq_slice_single_wrap, slices, NULL, slice_num);
+        }
+
     } else {
         /*[DIRAC_STD] 13.5.2 Slices. slice(sx,sy) */
         for (slice_y = 0; bufsize > 0 && slice_y < s->num_y; slice_y++) {
@@ -731,6 +839,11 @@ static int dirac_decode_picture_header(DiracContext *s)
 {
     int ret;
 
+    /* because we didn't _read_ the fragment_data_length and
+     * fragment_slice_count above we need to skip those 32-bits here. */
+    if (s->is_fragment)
+        skip_bits(&s->gb, 32);
+
     /* [DIRAC_STD] 11.3 Wavelet transform data */
     if ((ret = dirac_unpack_idwt_params(s)) < 0)
         return ret;
@@ -971,11 +1084,6 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                 s->current_picture = s->prev_field;
             }
 
-            /* because we didn't _read_ the fragment_data_length and
-             * fragment_slice_count above we need to skip those 32-bits here. */
-            if (s->is_fragment)
-                skip_bits(&s->gb, 32);
-
             /* [DIRAC_STD] 11.1 Picture parse. picture_parse() */
             if ((ret = dirac_decode_picture_header(s))) {
                 return ret;
@@ -1062,9 +1170,11 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
             continue;
         }
         /* [DIRAC_STD] dirac_decode_data_unit makes reference to the while defined in 9.3 inside the function parse_sequence() */
+#if 0
         if (data_unit_size)
             ret = dirac_decode_data_unit(avctx, f, buf+buf_idx, data_unit_size);
         else
+#endif
             ret = dirac_decode_data_unit(avctx, f, buf+buf_idx, buf_size - buf_idx);
         if (ret < 0) {
             av_log(avctx, AV_LOG_DEBUG, "dirac_decode_data_unit returned %d for parse_code 0x%02X\n", ret, buf[buf_idx + 4]);
@@ -1073,7 +1183,10 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
         picture_element_present |= *(buf + buf_idx + 4) & 0x8;
 
-        if (data_unit_size)
+        /* For fragments we need to advance by all the data consumed in
+         * decode_lowdelay.  It gets signalled via ret from the GetBitContext in
+         * DiracContext struct */
+        if (data_unit_size && buf[buf_idx+4] != DIRAC_PCODE_PICTURE_FRAGMENT_HQ)
             buf_idx += data_unit_size;
         else
             buf_idx += ret + 7 >> 3;
