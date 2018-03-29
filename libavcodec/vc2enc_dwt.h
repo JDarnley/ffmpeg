@@ -25,6 +25,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define NEW_TRANSFORMS 1
+
 typedef int32_t dwtcoef;
 
 enum VC2TransformType {
@@ -46,10 +48,26 @@ typedef struct VC2TransformContext {
                                                dwtcoef *data, ptrdiff_t stride,
                                                int width, int height,
                                                const ptrdiff_t hstride);
+    struct properties {
+        ptrdiff_t stride;
+        int width, height;
+    } properties[MAX_DWT_LEVELS];
+    struct progress {
+        int hfilter, vfilter_stage1, vfilter_stage2;
+    } progress[MAX_DWT_LEVELS];
+    enum VC2TransformType type;
 } VC2TransformContext;
 
-int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_stride, int p_height,
-                               int slice_w, int slice_h);
+int  ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
+                               int p_width, int p_height,
+                               int slice_w, int slice_h,
+                               enum VC2TransformType type);
+void ff_vc2enc_reset_transforms(VC2TransformContext *s);
+void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
+        int y,
+        int depth,
+        enum VC2TransformType type
+        );
 void ff_vc2enc_free_transforms(VC2TransformContext *t);
 
 #endif /* AVCODEC_VC2ENC_DWT_H */

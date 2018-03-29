@@ -935,19 +935,28 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
         offset = 0;
     }
 
+    ff_vc2enc_reset_transforms(t);
+
     for (y = 0; y < p->height; y += 16) {
         load_pixel_data((const uint8_t *)frame_data + offset + y*linesize,
                 p->coef_buf + y*p->coef_stride,
                 linesize, p->coef_stride,
                 p->width, 16, s->bpp, s->diff_offset);
+        if (y+16 > p->height)
+            memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
+#if NEW_TRANSFORMS
+        ff_vc2enc_transform(t, p->coef_buf,
+                FFMIN(y+16, p->dwt_height), s->wavelet_depth, idx);
+#endif
     }
-    memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 
+#if !NEW_TRANSFORMS
     for (level = s->wavelet_depth-1; level >= 0; level--) {
         const SubBand *b = &p->band[level][0];
         t->vc2_subband_dwt[idx](t, p->coef_buf, b->stride >> 1,
                                 b->width, b->height, b->hstride >> 1);
     }
+#endif
 
     return 0;
 }
@@ -1211,8 +1220,10 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         /* DWT init */
         if (ff_vc2enc_init_transforms(&s->transform_args[i].t,
                                       s->plane[i].coef_stride,
+                                      s->plane[i].dwt_width,
                                       s->plane[i].dwt_height,
-                                      s->slice_width, s->slice_height))
+                                      s->slice_width, s->slice_height,
+                                      s->wavelet_idx))
             goto alloc_fail;
     }
 

@@ -22,6 +22,7 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/mem.h"
+#include "dirac.h"
 #include "vc2enc_dwt.h"
 
 static void vc2_subband_dwt_97(VC2TransformContext *t, dwtcoef *data,
@@ -181,6 +182,106 @@ static void vc2_subband_dwt_53(VC2TransformContext *t, dwtcoef *data,
     }
 }
 
+static void legall_5_3_transform(dwtcoef *data,
+        ptrdiff_t stride, int width, int height, int hstride,
+        int y, struct progress *progress
+        )
+{
+    int x, line, line_max;
+    dwtcoef *data_original = data;
+    const ptrdiff_t synth_width  = width  << 1;
+    const ptrdiff_t synth_height = height << 1;
+
+    /* Horizontal synthesis. */
+    data = data_original + stride*progress->hfilter;
+    for (line = progress->hfilter; line < y; line++) {
+        /* Lifting stage 2. */
+        for (x = 0; x < width - 1; x++)
+            data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
+                                          data[(2*x+1)*hstride] << 1,
+                                          data[(2*x+2)*hstride] << 1);
+        data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
+                                      data[(2*x+1)*hstride] << 1,
+                                      data[(2*x  )*hstride] << 1);
+
+        /* Lifting stage 1. */
+        data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
+        for (x = 1; x < width; x++)
+            data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
+                                      data[(2*x  )*hstride] << 1,
+                                      data[(2*x+1)*hstride]);
+
+        data += stride;
+    }
+    progress->hfilter = line;
+
+    /* Vertical synthesis: Lifting stage 2. */
+    data = data_original + 2*stride*progress->vfilter_stage2;
+    line_max = y/2 - 1;
+    for (line = progress->vfilter_stage2; line < line_max; line++) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride+stride] = LIFT2(data[x*hstride],
+                                           data[x*hstride + stride],
+                                           data[x*hstride + stride*2]);
+        data += stride*2;
+    }
+    // line1 = line1 - line0 + line2, line=0
+    // line3 = line3 - line2 + line4, line=1
+    // line5 = line5 - line4 + line6, line=2
+    // line7 = line7 - line6 + line8, line=3
+    // line9 = line9 - line8 + line10, line=4
+    // line11 = line11 - line10 + line12, line=5
+    // line13 = line13 - line12 + line14, line=6
+
+    // line15 = line15 - line14 + line16, line=7
+    if (line == height-1) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride + stride] = LIFT2(data[x*hstride],
+                                             data[x*hstride + stride],
+                                             data[x*hstride]);
+        line++;
+    }
+    progress->vfilter_stage2 = line;
+
+    /* Vertical synthesis: Lifting stage 1. */
+    data = data_original + 2*stride*progress->vfilter_stage1;
+    line = progress->vfilter_stage1;
+    if (line == 0 && progress->vfilter_stage2 > 0) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride] = LIFT1(data[x*hstride + stride],
+                                    data[x*hstride],
+                                    data[x*hstride + stride]);
+        line++;
+    }
+    data += stride;
+
+    if (y != synth_height)
+        line_max -= 1;
+    /* Why subtract 1 here?  It should be able to filter the same number of
+     * lines because it is filtering the one above.  I don't get it!  The block
+     * above doesn't need any of the processed here to remain unmodified, it is
+     * done with them. */
+    for (; line < line_max; line++) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride + stride] = LIFT1(data[x*hstride],
+                                             data[x*hstride + stride],
+                                             data[x*hstride + stride*2]);
+        data += stride*2;
+    }
+    // line0 = line0 + line1 + line1, line=0
+    // line2 = line2 + line3 + line1, line=1
+    // line4 = line4 + line5 + line3, line=2
+    // line6 = line6 + line7 + line5, line=3
+    // line8 = line8 + line9 + line7, line=4
+    // line10 = line10 + line11 + line9, line=5
+    // line12 = line12 + line13 + line11, line=6
+
+    // line14 = line14 + line15 + line13, line=7
+
+    // line16 = line16 + line17 + line15, line=8
+    progress->vfilter_stage1 = line;
+}
+
 #undef LIFT1
 #undef LIFT2
 
@@ -234,13 +335,34 @@ static void vc2_subband_dwt_haar_shift(VC2TransformContext *t, dwtcoef *data,
     dwt_haar(data, stride, width, height, hstride, 1);
 }
 
-av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
-                                      int p_height, int slice_w, int slice_h)
+static void haar_transform(dwtcoef *data,
+        ptrdiff_t stride, int width, int height, int hstride,
+        int y, struct progress *progress,
+        const int shift)
 {
+    data += stride * progress->vfilter_stage1;
+    dwt_haar(data, stride, width/2, (y-progress->vfilter_stage1)/2, hstride, shift);
+    progress->vfilter_stage1 = y;
+}
+
+av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
+                                      int p_width, int p_height,
+                                      int slice_w, int slice_h,
+                                      enum VC2TransformType type)
+{
+    int level;
+
     s->vc2_subband_dwt[VC2_TRANSFORM_9_7]    = vc2_subband_dwt_97;
     s->vc2_subband_dwt[VC2_TRANSFORM_5_3]    = vc2_subband_dwt_53;
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR]   = vc2_subband_dwt_haar;
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR_S] = vc2_subband_dwt_haar_shift;
+    s->type = type;
+
+    for (level = 0; level < MAX_DWT_LEVELS; level++) {
+        s->properties[level].width  = p_width >> level;
+        s->properties[level].height = p_height >> level;
+        s->properties[level].stride = p_stride << level;
+    }
 
     /* Pad by the slice size, only matters for non-Haar wavelets */
     s->buffer = av_calloc((p_stride + slice_w)*(p_height + slice_h), sizeof(dwtcoef));
@@ -251,6 +373,66 @@ av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
     s->buffer += s->padding;
 
     return 0;
+}
+
+void ff_vc2enc_reset_transforms(VC2TransformContext *s)
+{
+    int i;
+    for (i = 0; i < MAX_DWT_LEVELS; i++) {
+        s->progress[i].hfilter =
+            s->progress[i].vfilter_stage1 =
+            s->progress[i].vfilter_stage2 = 0;
+    }
+}
+
+void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
+        int y,
+        int depth,
+        enum VC2TransformType type
+        )
+{
+    int level, y_l = y;
+
+    switch (type) {
+        case VC2_TRANSFORM_5_3:
+            for (level = 0; level < depth; level++) {
+                int hstride = 1 << level;
+
+                if (y_l != t->properties[level].height
+                        && y_l < t->progress[level].hfilter + 2)
+                    break;
+
+                legall_5_3_transform(data, t->properties[level].stride,
+                        t->properties[level].width/2, t->properties[level].height/2,
+                        hstride, y_l, &t->progress[level]);
+
+                if (y == t->properties[0].height)
+                    y_l /= 2;
+                else
+                    y_l = t->progress[level].vfilter_stage1;
+            }
+            break;
+
+        case VC2_TRANSFORM_HAAR:
+            for (level = 0; level < depth; level++) {
+                int hstride = 1 << level;
+                int y_l = y >> level;
+                haar_transform(data, t->properties[level].stride,
+                        t->properties[level].width, t->properties[level].height,
+                        hstride, y_l, &t->progress[level], 0);
+            }
+            break;
+
+        case VC2_TRANSFORM_HAAR_S:
+            for (level = 0; level < depth; level++) {
+                int hstride = 1 << level;
+                int y_l = y >> level;
+                haar_transform(data, t->properties[level].stride,
+                        t->properties[level].width, t->properties[level].height,
+                        hstride, y_l, &t->progress[level], 1);
+            }
+            break;
+    }
 }
 
 av_cold void ff_vc2enc_free_transforms(VC2TransformContext *s)
