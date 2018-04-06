@@ -185,53 +185,48 @@ static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
     //deinterleave(data, stride, width, height, synth);
 }
 
-static av_always_inline void dwt_haar(dwtcoef *synth, dwtcoef *data,
+static av_always_inline void dwt_haar(dwtcoef *data,
                                       ptrdiff_t stride, int width, int height,
                                       const ptrdiff_t hstride,
                                       const int s)
 {
     int x, y;
-    dwtcoef *synthl = synth, *datal = data;
     const ptrdiff_t synth_width  = width  << 1;
     const ptrdiff_t synth_height = height << 1;
 
     /* Horizontal synthesis. */
     for (y = 0; y < synth_height; y++) {
         for (x = 0; x < synth_width; x += 2) {
-            synthl[y*synth_width + x + 1] = (datal[y*stride + (x + 1) * hstride] << s) -
-                                            (datal[y*stride + x * hstride] << s);
-            synthl[y*synth_width + x] = (datal[y*stride + x * hstride] << s) +
-                                        ((synthl[y*synth_width + x + 1] + 1) >> 1);
+            data[y*stride + (x+1)*hstride] = (data[y*stride + (x+1)*hstride] << s) -
+                                             (data[y*stride + x*hstride] << s);
+            data[y*stride + x*hstride] = (data[y*stride + x*hstride] << s) +
+                                        ((data[y*stride + (x+1)*hstride] + 1) >> 1);
         }
     }
 
     /* Vertical synthesis. */
     for (x = 0; x < synth_width; x++) {
         for (y = 0; y < synth_height; y += 2) {
-            synthl[(y + 1)*synth_width + x] = synthl[(y + 1)*synth_width + x] -
-                                              synthl[y*synth_width + x];
-            synthl[y*synth_width + x] = synthl[y*synth_width + x] +
-                                        ((synthl[(y + 1)*synth_width + x] + 1) >> 1);
+            data[(y + 1)*stride + x*hstride] = data[(y + 1)*stride + x*hstride] -
+                                               data[y*stride + x*hstride];
+            data[y*stride + x*hstride] = data[y*stride + x*hstride] +
+                                       ((data[(y + 1)*stride + x*hstride] + 1) >> 1);
         }
     }
-
-    for (y = 0; y < synth_height; y++)
-        for (x = 0; x <synth_width; x++)
-            data[y*stride + x*hstride] = synth[y*synth_width + x];
 }
 
 static void vc2_subband_dwt_haar(dwtcoef *synth, dwtcoef *data,
                                  ptrdiff_t stride, int width, int height,
                                  const ptrdiff_t hstride)
 {
-    dwt_haar(synth, data, stride, width, height, hstride, 0);
+    dwt_haar(data, stride, width, height, hstride, 0);
 }
 
 static void vc2_subband_dwt_haar_shift(dwtcoef *synth, dwtcoef *data,
                                        ptrdiff_t stride, int width, int height,
                                        const ptrdiff_t hstride)
 {
-    dwt_haar(synth, data, stride, width, height, hstride, 1);
+    dwt_haar(data, stride, width, height, hstride, 1);
 }
 
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
