@@ -74,12 +74,15 @@ typedef struct SubBand {
 
 typedef struct Plane {
     DWTPlane idwt;
+    DWTContext idwt_ctx;
 
     int width;
     int height;
     ptrdiff_t stride;
 
     SubBand band[MAX_DWT_LEVELS][4];
+
+    int decoded_row_count, transformed_row_count;
 } Plane;
 
 /* Used by Low Delay and High Quality profiles */
@@ -594,6 +597,17 @@ static int decode_lowdelay(DiracContext *s)
             avctx->execute2(avctx, decode_hq_slice_single_wrap, slices, NULL, slice_num);
         }
 
+        /* FIXME: might need correcting when slice sizes are not a factor of
+         * plane height and need to check padding.  Also assumes an entire row
+         * of slices is obtained here.  That may be a bad assumption. */
+        if (x_offset == s->num_x-1) {
+            for (i = 0; i < 3; i++)
+                s->plane[i].decoded_row_count = s->plane[i].height * (y_offset+1) / s->num_y;
+        } else {
+            for (i = 0; i < 3; i++)
+                s->plane[i].decoded_row_count = s->plane[i].height * (y_offset) / s->num_y;
+        }
+
     } else {
         /*[DIRAC_STD] 13.5.2 Slices. slice(sx,sy) */
         for (slice_y = 0; bufsize > 0 && slice_y < s->num_y; slice_y++) {
@@ -671,6 +685,11 @@ static void init_planes(DiracContext *s)
                     b->ibuf += (b->stride >> 1);
             }
         }
+
+        /* Sets up the DWT context pointers */
+        ff_spatial_idwt_init(&p->idwt_ctx, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
+        p->transformed_row_count = 0;
+        p->decoded_row_count = 0;
     }
 }
 
@@ -756,30 +775,30 @@ static int dirac_unpack_idwt_params(DiracContext *s)
 static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
     int y;
-    DWTContext d;
     DiracContext *s   = avctx->priv_data;
     Plane *p          = &s->plane[jobnr];
     uint8_t *frame    = s->current_picture->data[jobnr];
     const int idx     = (s->bit_depth - 8) >> 1;
     const int ostride = p->stride << s->field_coding;
+    /* TODO: better wavelets will need more overlap fudging here.  Even Haar
+     * needed 1.  Was that because it starts at -1? */
+    int overlap = p->decoded_row_count != p->height;
 
     /* Interleaves the fields */
     frame += s->cur_field * p->stride;
 
-    /* Sets up the DWT context pointers */
-    ff_spatial_idwt_init(&d, &p->idwt, s->wavelet_idx + 2, s->wavelet_depth, s->bit_depth);
-
     /* Does 16 lines at a time -
      * Could reduce the latency by returning 16 lines instead of an entire frame
      * and even further if you decode and idwt a row of slices at once */
-    for (y = 0; y < p->height; y += 16) {
-        ff_spatial_idwt_slice2(&d, y+16); /* decode */
-        /* After doing the 16-line iDWT run the signed->unsigned SIMD */
-        s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
-                                                 ostride,
-                                                 p->idwt.buf + y*p->idwt.stride,
-                                                 p->idwt.stride, p->width, 16);
-    }
+    y = p->transformed_row_count;
+    ff_spatial_idwt_slice2(&p->idwt_ctx, p->decoded_row_count - overlap); /* decode */
+    /* After doing the 16-line iDWT run the signed->unsigned SIMD */
+    s->diracdsp.put_signed_rect_clamped[idx](frame + y*ostride,
+                                             ostride,
+                                             p->idwt.buf + y*p->idwt.stride,
+                                             p->idwt.stride, p->width,
+                                             p->decoded_row_count - y - overlap);
+    p->transformed_row_count = p->decoded_row_count - overlap;
 
     return 0;
 }
@@ -798,11 +817,9 @@ static int dirac_decode_frame_internal(DiracContext *s)
         return ret;
     }
 
-    if (!s->is_fragment || s->fragment_slices_received == s->num_x*s->num_y) {
-        /* Does the iDWT on the 3 planes in parallel, not in git master since
-        * the MC depends on doing it serially */
-        s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
-    }
+    /* Does the iDWT on the 3 planes in parallel, not in git master since
+     * the MC depends on doing it serially */
+    s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
 
     return 0;
 }
