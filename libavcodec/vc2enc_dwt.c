@@ -347,22 +347,12 @@ static void haar_transform(dwtcoef *data,
 
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
                                       int p_width, int p_height,
-                                      int slice_w, int slice_h,
-                                      enum VC2TransformType type)
+                                      int slice_w, int slice_h)
 {
-    int level;
-
     s->vc2_subband_dwt[VC2_TRANSFORM_9_7]    = vc2_subband_dwt_97;
     s->vc2_subband_dwt[VC2_TRANSFORM_5_3]    = vc2_subband_dwt_53;
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR]   = vc2_subband_dwt_haar;
     s->vc2_subband_dwt[VC2_TRANSFORM_HAAR_S] = vc2_subband_dwt_haar_shift;
-    s->type = type;
-
-    for (level = 0; level < MAX_DWT_LEVELS; level++) {
-        s->properties[level].width  = p_width >> level;
-        s->properties[level].height = p_height >> level;
-        s->properties[level].stride = p_stride << level;
-    }
 
     /* Pad by the slice size, only matters for non-Haar wavelets */
     s->buffer = av_calloc((p_stride + slice_w)*(p_height + slice_h), sizeof(dwtcoef));
@@ -386,27 +376,28 @@ void ff_vc2enc_reset_transforms(VC2TransformContext *s)
 }
 
 void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
-        int y,
-        int depth,
-        enum VC2TransformType type
-        )
+        ptrdiff_t stride, int width, int height,
+        int y, const int depth, const enum VC2TransformType type)
 {
     int level, y_l = y;
 
     switch (type) {
         case VC2_TRANSFORM_5_3:
             for (level = 0; level < depth; level++) {
+                ptrdiff_t stride_l = stride << level;
+                int width_l = width >> level;
+                int height_l = height >> level;
                 int hstride = 1 << level;
 
-                if (y_l != t->properties[level].height
+                if (y_l != height_l
                         && y_l < t->progress[level].hfilter + 2)
                     break;
 
-                legall_5_3_transform(data, t->properties[level].stride,
-                        t->properties[level].width/2, t->properties[level].height/2,
+                legall_5_3_transform(data, stride_l,
+                        width_l/2, height_l/2,
                         hstride, y_l, &t->progress[level]);
 
-                if (y == t->properties[0].height)
+                if (y == height)
                     y_l /= 2;
                 else
                     y_l = t->progress[level].vfilter_stage1;
@@ -417,8 +408,8 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 int hstride = 1 << level;
                 int y_l = y >> level;
-                haar_transform(data, t->properties[level].stride,
-                        t->properties[level].width, t->properties[level].height,
+                haar_transform(data, stride << level,
+                        width >> level, height >> level,
                         hstride, y_l, &t->progress[level], 0);
             }
             break;
@@ -427,8 +418,8 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 int hstride = 1 << level;
                 int y_l = y >> level;
-                haar_transform(data, t->properties[level].stride,
-                        t->properties[level].width, t->properties[level].height,
+                haar_transform(data, stride << level,
+                        width >> level, height >> level,
                         hstride, y_l, &t->progress[level], 1);
             }
             break;

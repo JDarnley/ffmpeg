@@ -946,6 +946,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
             memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 #if NEW_TRANSFORMS
         ff_vc2enc_transform(t, p->coef_buf,
+                p->coef_stride, p->dwt_width, p->dwt_height,
                 FFMIN(y+16, p->dwt_height), s->wavelet_depth, idx);
 #endif
     }
@@ -1222,8 +1223,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                                       s->plane[i].coef_stride,
                                       s->plane[i].dwt_width,
                                       s->plane[i].dwt_height,
-                                      s->slice_width, s->slice_height,
-                                      s->wavelet_idx))
+                                      s->slice_width, s->slice_height))
             goto alloc_fail;
     }
 
