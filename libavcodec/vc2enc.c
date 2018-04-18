@@ -983,6 +983,36 @@ static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
     }
 }
 
+static int import_transform_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
+{
+    VC2EncContext *s       = avctx->priv_data;
+    TransformArgs *ta      = &s->transform_args[jobnr];
+    Plane *p               = &s->plane[jobnr];
+    VC2TransformContext *t = &ta->t;
+    const AVFrame *frame   = ta->frame;
+
+    int chroma_y_shift = jobnr ? s->chroma_y_shift : 0;
+    int height = frame->height >> chroma_y_shift;
+    int pos_y = frame->pos_y >> chroma_y_shift;
+
+    load_pixel_data(frame->data[jobnr], p->coef_buf + pos_y*p->coef_stride,
+            frame->linesize[jobnr], p->coef_stride,
+            p->width, height, s->bpp, s->diff_offset);
+
+    if (pos_y + height == p->height) {
+        memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
+        height = p->dwt_height;
+    } else {
+        height = pos_y + height;
+    }
+
+    ff_vc2enc_transform(t, p->coef_buf,
+            p->coef_stride, p->dwt_width, p->dwt_height,
+            height, s->wavelet_depth, s->wavelet_idx);
+
+    return 0;
+}
+
 /**
  * Dirac Specification ->
  * 9.6 Parse Info Header Syntax. parse_info()
@@ -1008,22 +1038,14 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         int height = frame->height >> chroma_y_shift;
         int pos_y = frame->pos_y >> chroma_y_shift;
 
-        /* TODO thread this call */
-        load_pixel_data(frame->data[i], p->coef_buf + pos_y*p->coef_stride,
-                frame->linesize[i], p->coef_stride,
-                p->width, height, s->bpp, s->diff_offset);
+        if (frame->pos_y == 0)
+            ff_vc2enc_reset_transforms(&s->transform_args[i].t);
 
         s->transform_args[i].ctx   = s;
         s->transform_args[i].plane = p;
         s->transform_args[i].frame = frame;
     }
-#if THREADED_TRANSFORM
-    s->avctx->execute2(s->avctx, dwt_slice, s->transform_args, NULL,
-            s->num_y_partial*s->num_x*3);
-#else
-    for (i = 0; i < s->num_y_partial*s->num_x*3; i++)
-        dwt_slice(s->avctx, NULL, i, 0);
-#endif
+    s->avctx->execute2(s->avctx, import_transform_plane, NULL, NULL, 3);
 
     max_frame_bytes = header_size + calc_slice_sizes(s)
         + s->num_y_partial*(s->num_x / s->fragment_size) * (13+12); /* "BBCD" header and fragment header */;

@@ -22,6 +22,7 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/mem.h"
+#include "dirac.h"
 #include "vc2enc_dwt.h"
 
 static void vc2_subband_dwt_97(dwtcoef *synth, dwtcoef *data,
@@ -232,6 +233,16 @@ static void vc2_subband_dwt_haar_shift(dwtcoef *synth, dwtcoef *data,
     dwt_haar(data, stride, width, height, hstride, 1);
 }
 
+static void haar_transform(dwtcoef *data,
+        ptrdiff_t stride, int width, int height, int hstride,
+        int y, struct progress *progress,
+        const int shift)
+{
+    data += stride * progress->vfilter_stage1;
+    dwt_haar(data, stride, width/2, (y-progress->vfilter_stage1)/2, hstride, shift);
+    progress->vfilter_stage1 = y;
+}
+
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
                                       int p_height, int slice_w, int slice_h)
 {
@@ -249,6 +260,43 @@ av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
     s->buffer += s->padding;
 
     return 0;
+}
+
+void ff_vc2enc_reset_transforms(VC2TransformContext *s)
+{
+    int i;
+    for (i = 0; i < MAX_DWT_LEVELS; i++) {
+        s->progress[i].hfilter =
+            s->progress[i].vfilter_stage1 =
+            s->progress[i].vfilter_stage2 = 0;
+    }
+}
+
+void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
+        ptrdiff_t stride, int width, int height,
+        int y, const int depth, const enum VC2TransformType type)
+{
+    int level;
+
+    switch (type) {
+        case VC2_TRANSFORM_HAAR:
+            for (level = 0; level < depth; level++) {
+                int hstride = 1 << level;
+                haar_transform(data, stride << level,
+                        width >> level, height >> level,
+                        hstride, y >> level, &t->progress[level], 0);
+            }
+            break;
+
+        case VC2_TRANSFORM_HAAR_S:
+            for (level = 0; level < depth; level++) {
+                int hstride = 1 << level;
+                haar_transform(data, stride << level,
+                        width >> level, height >> level,
+                        hstride, y >> level, &t->progress[level], 1);
+            }
+            break;
+    }
 }
 
 av_cold void ff_vc2enc_free_transforms(VC2TransformContext *s)
