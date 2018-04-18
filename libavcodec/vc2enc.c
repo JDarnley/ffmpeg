@@ -29,9 +29,6 @@
 #include "vc2enc_dwt.h"
 #include "diractab.h"
 
-#define NEW_SLICES 1
-#define THREADED_TRANSFORM 1
-
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
 #define COEF_LUT_TAB 2048
@@ -920,41 +917,6 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
  * to restore the image perfectly to its original size.
  */
 
-static int dwt_slice(struct AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
-{
-    int i_plane            = jobnr % 3;
-    int i_slice            = jobnr / 3;
-    VC2EncContext *s       = avctx->priv_data;
-    TransformArgs *ta      = &s->transform_args[i_plane];
-    SliceArgs *slice       = &s->slice_args[i_slice];
-    Plane *p               = &s->plane[i_plane];
-    VC2TransformContext *t = &ta->t;
-    const int idx          = s->wavelet_idx;
-
-    int w = p->slice_w, h = p->slice_h;
-    int x = slice->x,   y = slice->y;
-
-    /* coeff stride is in number of values */
-    ptrdiff_t coeff_stride = p->coef_stride;
-
-    /* Advance the plane coefficient buffer to top left corner of slice while
-     * keeping data in place. */
-    dwtcoef *coeff_data    = p->coef_buf + x*w + y*h*coeff_stride;
-
-    /* Skip over whole slices worth of samples to get to unused area of buffer. */
-    dwtcoef *transform_buf = t->buffer   + x*w*h + y*w*h*s->num_x;
-
-    for (int level = s->wavelet_depth-1; level >= 0; level--) {
-        SubBand *b = &p->band[level][0];
-        w >>= 1;
-        h >>= 1;
-        t->vc2_subband_dwt[idx](transform_buf, coeff_data, b->stride >> 1,
-                w, h, b->hstride >> 1);
-    }
-
-    return 0;
-}
-
 static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
         ptrdiff_t pixel_stride, ptrdiff_t coeff_stride,
         int width, int height, int bytes_per_pixel, dwtcoef diff_offset)
@@ -1034,9 +996,6 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     /* Threaded DWT transform */
     for (i = 0; i < 3; i++) {
         Plane *p = &s->plane[i];
-        int chroma_y_shift = i ? s->chroma_y_shift : 0;
-        int height = frame->height >> chroma_y_shift;
-        int pos_y = frame->pos_y >> chroma_y_shift;
 
         if (frame->pos_y == 0)
             ff_vc2enc_reset_transforms(&s->transform_args[i].t);
@@ -1219,7 +1178,6 @@ static av_cold int vc2_encode_end(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_INFO, "Qavg: %i\n", s->q_avg);
 
     for (i = 0; i < 3; i++) {
-        ff_vc2enc_free_transforms(&s->transform_args[i].t);
         av_freep(&s->plane[i].coef_buf);
     }
 
@@ -1397,9 +1355,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
         p->coef_buf = av_mallocz(w*h*sizeof(dwtcoef));
         if (!p->coef_buf)
-            goto alloc_fail;
-        /* DWT init */
-        if (ff_vc2enc_init_transforms(&s->transform_args[i].t, w, h, slice_w, slice_h))
             goto alloc_fail;
 
         w = p->dwt_width;

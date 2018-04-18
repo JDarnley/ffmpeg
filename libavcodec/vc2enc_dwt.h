@@ -40,23 +40,14 @@ enum VC2TransformType {
 };
 
 typedef struct VC2TransformContext {
-    dwtcoef *buffer;
-    int padding;
-    void (*vc2_subband_dwt[VC2_TRANSFORMS_NB])(dwtcoef *synth,
-                                               dwtcoef *data, ptrdiff_t stride,
-                                               int width, int height,
-                                               const ptrdiff_t hstride);
     struct progress {
         int hfilter, vfilter_stage1, vfilter_stage2;
     } progress[MAX_DWT_LEVELS];
 } VC2TransformContext;
 
-int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_stride, int p_height,
-                               int slice_w, int slice_h);
 void ff_vc2enc_reset_transforms(VC2TransformContext *s);
 void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
         ptrdiff_t stride, int width, int height,
         int y, const int depth, const enum VC2TransformType type);
-void ff_vc2enc_free_transforms(VC2TransformContext *t);
 
 #endif /* AVCODEC_VC2ENC_DWT_H */
