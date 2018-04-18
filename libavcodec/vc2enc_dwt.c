@@ -25,164 +25,6 @@
 #include "dirac.h"
 #include "vc2enc_dwt.h"
 
-static void vc2_subband_dwt_97(dwtcoef *synth, dwtcoef *data,
-                               ptrdiff_t stride, int width, int height,
-                               const ptrdiff_t hstride)
-{
-    int x, y;
-    dwtcoef *datal = data, *synthl = synth;
-    const ptrdiff_t synth_width  = width  << 1;
-    const ptrdiff_t synth_height = height << 1;
-
-    /*
-     * Shift in one bit that is used for additional precision and copy
-     * the data to the buffer.
-     */
-    for (y = 0; y < synth_height; y++) {
-        for (x = 0; x < synth_width; x++)
-            synthl[x] = datal[x] << 1;
-        synthl += synth_width;
-        datal += stride;
-    }
-
-    /* Horizontal synthesis. */
-    synthl = synth;
-    for (y = 0; y < synth_height; y++) {
-        /* Lifting stage 2. */
-        synthl[1] -= (8*synthl[0] + 9*synthl[2] - synthl[4] + 8) >> 4;
-        for (x = 1; x < width - 2; x++)
-            synthl[2*x + 1] -= (9*synthl[2*x] + 9*synthl[2*x + 2] - synthl[2*x + 4] -
-                                synthl[2 * x - 2] + 8) >> 4;
-        synthl[synth_width - 1] -= (17*synthl[synth_width - 2] -
-                                    synthl[synth_width - 4] + 8) >> 4;
-        synthl[synth_width - 3] -= (8*synthl[synth_width - 2] +
-                                    9*synthl[synth_width - 4] -
-                                    synthl[synth_width - 6] + 8) >> 4;
-        /* Lifting stage 1. */
-        synthl[0] += (synthl[1] + synthl[1] + 2) >> 2;
-        for (x = 1; x < width - 1; x++)
-            synthl[2*x] += (synthl[2*x - 1] + synthl[2*x + 1] + 2) >> 2;
-
-        synthl[synth_width - 2] += (synthl[synth_width - 3] +
-                                    synthl[synth_width - 1] + 2) >> 2;
-        synthl += synth_width;
-    }
-
-    /* Vertical synthesis: Lifting stage 2. */
-    synthl = synth + synth_width;
-    for (x = 0; x < synth_width; x++)
-        synthl[x] -= (8*synthl[x - synth_width] + 9*synthl[x + synth_width] -
-                      synthl[x + 3 * synth_width] + 8) >> 4;
-
-    synthl = synth + (synth_width << 1);
-    for (y = 1; y < height - 2; y++) {
-        for (x = 0; x < synth_width; x++)
-            synthl[x + synth_width] -= (9*synthl[x] +
-                                        9*synthl[x + 2 * synth_width] -
-                                        synthl[x - 2 * synth_width] -
-                                        synthl[x + 4 * synth_width] + 8) >> 4;
-        synthl += synth_width << 1;
-    }
-
-    synthl = synth + (synth_height - 1) * synth_width;
-    for (x = 0; x < synth_width; x++) {
-        synthl[x] -= (17*synthl[x - synth_width] -
-                      synthl[x - 3*synth_width] + 8) >> 4;
-                      synthl[x - 2*synth_width] -= (9*synthl[x - 3*synth_width] +
-                      8*synthl[x - 1*synth_width] - synthl[x - 5*synth_width] + 8) >> 4;
-    }
-
-    /* Vertical synthesis: Lifting stage 1. */
-    synthl = synth;
-    for (x = 0; x < synth_width; x++)
-        synthl[x] += (synthl[x + synth_width] + synthl[x + synth_width] + 2) >> 2;
-
-    synthl = synth + (synth_width << 1);
-    for (y = 1; y < height - 1; y++) {
-        for (x = 0; x < synth_width; x++)
-            synthl[x] += (synthl[x - synth_width] + synthl[x + synth_width] + 2) >> 2;
-        synthl += synth_width << 1;
-    }
-
-    synthl = synth + (synth_height - 2) * synth_width;
-    for (x = 0; x < synth_width; x++)
-        synthl[x] += (synthl[x - synth_width] + synthl[x + synth_width] + 2) >> 2;
-
-    //deinterleave(data, stride, width, height, synth);
-}
-
-/* LeGall (5,3), VC2_TRANSFORM_5_3 */
-
-#define LIFT1(val0, val1, val2)\
-    ((val1) + ((val0) + (val2) + 2 >> 2))
-
-#define LIFT2(val0, val1, val2)\
-    ((val1) - ((val0) + (val2) + 1 >> 1))
-
-static void vc2_subband_dwt_53(dwtcoef *synth, dwtcoef *data,
-                               ptrdiff_t stride, int width, int height,
-                               const ptrdiff_t hstride)
-{
-    int x, y;
-    dwtcoef *data_original = data;
-    const ptrdiff_t synth_width  = width  << 1;
-    const ptrdiff_t synth_height = height << 1;
-
-    /* Horizontal synthesis. */
-    data = data_original;
-    for (y = 0; y < synth_height; y++) {
-        /* Lifting stage 2. */
-        for (x = 0; x < width - 1; x++)
-            data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
-                                          data[(2*x+1)*hstride] << 1,
-                                          data[(2*x+2)*hstride] << 1);
-        data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
-                                      data[(2*x+1)*hstride] << 1,
-                                      data[(2*x  )*hstride] << 1);
-
-        /* Lifting stage 1. */
-        data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
-        for (x = 1; x < width; x++)
-            data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
-                                      data[(2*x  )*hstride] << 1,
-                                      data[(2*x+1)*hstride]);
-
-        data += stride;
-    }
-
-    /* Vertical synthesis: Lifting stage 2. */
-    data = data_original;
-    for (y = 0; y < height - 1; y++) {
-        for (x = 0; x < synth_width; x++)
-            data[x*hstride+stride] = LIFT2(data[x*hstride],
-                                           data[x*hstride + stride],
-                                           data[x*hstride + stride*2]);
-        data += stride*2;
-    }
-    for (x = 0; x < synth_width; x++)
-        data[x*hstride + stride] = LIFT2(data[x*hstride],
-                                         data[x*hstride + stride],
-                                         data[x*hstride]);
-
-    /* Vertical synthesis: Lifting stage 1. */
-    data = data_original;
-    for (x = 0; x < synth_width; x++)
-        data[x*hstride] = LIFT1(data[x*hstride + stride],
-                                data[x*hstride],
-                                data[x*hstride + stride]);
-    data = data_original + stride;
-    for (y = 1; y < height; y++) {
-        for (x = 0; x < synth_width; x++)
-            data[x*hstride + stride] = LIFT1(data[x*hstride],
-                                             data[x*hstride + stride],
-                                             data[x*hstride + stride*2]);
-        data += stride*2;
-    }
-}
-
-#undef LIFT1
-#undef LIFT2
-
 /* Haar, VC2_TRANSFORM_HAAR, VC2_TRANSFORM_HAAR_S */
 
 static av_always_inline void dwt_haar(dwtcoef *data,
@@ -219,20 +61,6 @@ static av_always_inline void dwt_haar(dwtcoef *data,
     }
 }
 
-static void vc2_subband_dwt_haar(dwtcoef *synth, dwtcoef *data,
-                                 ptrdiff_t stride, int width, int height,
-                                 const ptrdiff_t hstride)
-{
-    dwt_haar(data, stride, width, height, hstride, 0);
-}
-
-static void vc2_subband_dwt_haar_shift(dwtcoef *synth, dwtcoef *data,
-                                       ptrdiff_t stride, int width, int height,
-                                       const ptrdiff_t hstride)
-{
-    dwt_haar(data, stride, width, height, hstride, 1);
-}
-
 static void haar_transform(dwtcoef *data,
         ptrdiff_t stride, int width, int height, int hstride,
         int y, struct progress *progress,
@@ -241,25 +69,6 @@ static void haar_transform(dwtcoef *data,
     data += stride * progress->vfilter_stage1;
     dwt_haar(data, stride, width/2, (y-progress->vfilter_stage1)/2, hstride, shift);
     progress->vfilter_stage1 = y;
-}
-
-av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
-                                      int p_height, int slice_w, int slice_h)
-{
-    s->vc2_subband_dwt[VC2_TRANSFORM_9_7]    = vc2_subband_dwt_97;
-    s->vc2_subband_dwt[VC2_TRANSFORM_5_3]    = vc2_subband_dwt_53;
-    s->vc2_subband_dwt[VC2_TRANSFORM_HAAR]   = vc2_subband_dwt_haar;
-    s->vc2_subband_dwt[VC2_TRANSFORM_HAAR_S] = vc2_subband_dwt_haar_shift;
-
-    /* Pad by the slice size, only matters for non-Haar wavelets */
-    s->buffer = av_calloc((p_stride + slice_w)*(p_height + slice_h), sizeof(dwtcoef));
-    if (!s->buffer)
-        return 1;
-
-    s->padding = (slice_h >> 1)*p_stride + (slice_w >> 1);
-    s->buffer += s->padding;
-
-    return 0;
 }
 
 void ff_vc2enc_reset_transforms(VC2TransformContext *s)
@@ -297,10 +106,4 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             }
             break;
     }
-}
-
-av_cold void ff_vc2enc_free_transforms(VC2TransformContext *s)
-{
-    av_free(s->buffer - s->padding);
-    s->buffer = NULL;
 }
