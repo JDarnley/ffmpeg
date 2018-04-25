@@ -1442,6 +1442,21 @@ typedef struct AVPacket {
     attribute_deprecated
     int64_t convergence_duration;
 #endif
+
+    /**
+     * Total number of lines contained within one picture.
+     */
+    int total_lines;
+
+    /**
+     * Number of picture lines contained within the packet.
+     */
+    int lines;
+
+    /**
+     * First line contained within the packet.
+     */
+    int first_line;
 } AVPacket;
 #define AV_PKT_FLAG_KEY     0x0001 ///< The packet contains a keyframe
 #define AV_PKT_FLAG_CORRUPT 0x0002 ///< The packet content is corrupted
