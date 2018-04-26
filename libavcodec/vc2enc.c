@@ -160,7 +160,6 @@ typedef struct VC2EncContext {
     int num_x; /* #slices horizontally */
     int num_y; /* #slices vertically */
     int num_y_partial;
-    int slice_y_offset;
     int prefix_bytes;
     int size_scaler;
     int chroma_x_shift;
@@ -193,6 +192,9 @@ typedef struct VC2EncContext {
     int fragment_size;
 
     int expected_pos_y;
+
+    int number_of_rows_sent;
+    int number_of_lines_sent;
 } VC2EncContext;
 
 /* Puts an unsigned golomb code to the bitstream */
@@ -779,7 +781,7 @@ static int calc_slice_sizes(VC2EncContext *s)
         }
     }
 
-    bytes_left = (s->frame_max_bytes / s->num_y) - bytes_left;
+    bytes_left = (s->num_y_partial * s->frame_max_bytes / s->num_y) - bytes_left;
 
     /* 2nd pass - uses the leftover bits and distributes them to the highest
      * costing slices to boost the quality. Not required, you can comment it
@@ -975,6 +977,30 @@ static int import_transform_plane(AVCodecContext *avctx, void *arg, int jobnr, i
     return 0;
 }
 
+static int slice_rows_available(const VC2EncContext *s)
+{
+    int y, p;
+    const int depth = s->wavelet_depth;
+
+    for (y = 0; y < s->num_y; y++) {
+        for (p = 0; p < 3; p++) {
+            int height = s->plane[p].dwt_height >> depth;
+            if (height*(y+1)/s->num_y * 2 > s->transform_args[p].t.progress[depth-1].vfilter_stage1)
+                return y;
+        }
+    }
+    return y;
+}
+
+static int lines_in_packet(const VC2EncContext *s)
+{
+    int y, ret = 0;
+    const int height = s->plane[0].dwt_height >> 1;
+    for (y = s->number_of_rows_sent; y < s->number_of_rows_sent + s->num_y_partial; y++)
+        ret += 2 * (height*(y+1)/s->num_y - height*(y)/s->num_y);
+    return ret;
+}
+
 /**
  * Dirac Specification ->
  * 9.6 Parse Info Header Syntax. parse_info()
@@ -984,16 +1010,13 @@ static int import_transform_plane(AVCodecContext *avctx, void *arg, int jobnr, i
 
 /* Field - 0 progressive, 1 - top field, 2 - bottom field */
 static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
-                        const char *aux_data, const int header_size, int field)
+                        const char *aux_data, const int header_size,
+                        int *got_packet, int field)
 {
     int i, x, y, ret;
     int64_t max_frame_bytes;
 
-    for (y = 0; y < s->num_y_partial; y++)
-        for (x = 0; x < s->num_x; x++)
-            s->slice_args[y*s->num_x + x].y = y + s->slice_y_offset;
-
-    /* Threaded DWT transform */
+    /* Import image data and transform */
     for (i = 0; i < 3; i++) {
         Plane *p = &s->plane[i];
 
@@ -1006,6 +1029,21 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
     s->avctx->execute2(s->avctx, import_transform_plane, NULL, NULL, 3);
 
+    /* Check how many rows are available. */
+    int rows_available = slice_rows_available(s);
+    if (rows_available <= s->number_of_rows_sent) {
+        /* If no rows rows are available return no packet. */
+        *got_packet = 0;
+        return 0;
+    }
+
+    /* Create and write packet. */
+    s->num_y_partial = rows_available - s->number_of_rows_sent;
+    for (y = 0; y < s->num_y_partial; y++)
+        for (x = 0; x < s->num_x; x++)
+            s->slice_args[y*s->num_x + x].y = y + s->number_of_rows_sent;
+
+    /* Calculate per-slice quantizers and sizes */
     max_frame_bytes = header_size + calc_slice_sizes(s)
         + s->num_y_partial*(s->num_x / s->fragment_size) * (13+12); /* "BBCD" header and fragment header */;
 
@@ -1018,7 +1056,12 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
     init_put_bits(&s->pb, avpkt->data, avpkt->size);
 
-    if (frame->pos_y == 0) {
+    /* Pass the "length" of this packet to user. */
+    avpkt->total_lines = s->plane[0].dwt_height;
+    avpkt->lines = lines_in_packet(s);
+    avpkt->first_line = s->number_of_lines_sent;
+
+    if (s->number_of_rows_sent == 0) {
         int before, after;
 
         /* Sequence header */
@@ -1045,8 +1088,9 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     }
 
     /* Encode slices */
+    for (y = 0; y < s->num_y_partial; y++) {
     for (int x = 0; x < s->num_x; x++) {
-        SliceArgs *arg = &s->slice_args[x];
+        SliceArgs *arg = &s->slice_args[y*s->num_x + x];
         uint8_t *buf;
 
         if (!(x % s->fragment_size)) {
@@ -1054,9 +1098,9 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
                 write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
             encode_parse_info(s, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, 0, s->prev_offset);
             if (s->fragment_size == 1)
-                encode_fragment_header(s, arg->bytes, s->fragment_size, x, s->slice_y_offset);
+                encode_fragment_header(s, arg->bytes, s->fragment_size, x, arg->y);
             else
-                encode_fragment_header(s, 0, s->fragment_size, x, s->slice_y_offset);
+                encode_fragment_header(s, 0, s->fragment_size, x, arg->y);
             avpriv_align_put_bits(&s->pb);
         }
 
@@ -1071,8 +1115,10 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         /* Skips the main put_bits's position by the total slice bytes */
         skip_put_bytes(&s->pb, arg->bytes+s->prefix_bytes);
     }
+    }
 
-    s->avctx->execute(s->avctx, encode_hq_slice, s->slice_args, NULL, s->num_x, sizeof(SliceArgs));
+    s->avctx->execute(s->avctx, encode_hq_slice, s->slice_args, NULL,
+            s->num_y_partial * s->num_x, sizeof(SliceArgs));
 
     write_prev_parse_info_next_offset(s, get_distance_from_prev_parse_info(s));
 
@@ -1081,10 +1127,13 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
      * Where pictures are fields, a sequence shall comprise a whole number of
      * frames (i.e., an even number of fields) and shall begin and end with a
      * whole frame/field-pair. */
-    if (field != 1 && frame->pos_y == s->avctx->height - s->plane[0].slice_h) {
+    if (field != 1 && s->num_y == s->number_of_rows_sent + s->num_y_partial) {
         encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
     }
 
+    s->number_of_rows_sent += s->num_y_partial;
+    s->number_of_lines_sent += lines_in_packet(s);
+    *got_packet = 1;
     return 0;
 }
 
@@ -1114,12 +1163,11 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
     s->avctx = avctx;
     s->prev_parse_info_position = -1;
-    s->num_y_partial = frame->height / s->slice_height;
-    s->slice_y_offset = frame->pos_y / s->slice_height;
 
     if (!frame->pos_y) {
         s->size_scaler = 2;
         s->prefix_bytes = 0;
+        s->number_of_rows_sent = s->number_of_lines_sent = 0;
 
         /* Rate control */
         /* bitrate(per second)/framerate */
@@ -1147,12 +1195,15 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
     /* Calls encode_frame() once for each field (or once for progressive) */
 
-    ret = encode_frame(s, avpkt, frame, aux_data, header_size, (s->interlaced) ? 1 + (s->picture_number & 1) : 0);
+    ret = encode_frame(s, avpkt, frame, aux_data, header_size, got_packet,
+            (s->interlaced) ? 1 + (s->picture_number & 1) : 0);
     if (ret)
         return ret;
 
-    flush_put_bits(&s->pb);
-    avpkt->size = put_bits_count(&s->pb) >> 3;
+    if (*got_packet) {
+        flush_put_bits(&s->pb);
+        avpkt->size = put_bits_count(&s->pb) >> 3;
+    }
 
     s->expected_pos_y += frame->height;
     if (s->expected_pos_y >= avctx->height) {
@@ -1164,8 +1215,6 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
             av_log(avctx, AV_LOG_WARNING, "average quantizer very large: %i\n", avg_quant);
         s->q_avg = s->slice_count = 0;
     }
-
-    *got_packet = 1;
 
     return 0;
 }
