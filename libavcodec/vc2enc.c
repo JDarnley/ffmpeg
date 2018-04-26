@@ -1148,13 +1148,6 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     const int aux_data_size = bitexact ? sizeof("Lavc") : sizeof(LIBAVCODEC_IDENT);
     const int header_size = 100 + aux_data_size;
 
-    if (frame->width != s->plane[0].width
-            || frame->height != s->plane[0].slice_h) {
-        av_log(avctx, AV_LOG_ERROR, "given picture size (%dx%d) is not rows of slices (%dx%d)\n",
-              frame->width, frame->height, s->plane[0].width, s->plane[0].slice_h);
-        return AVERROR(EINVAL);
-    }
-
     if (frame->pos_x || frame->pos_y != s->expected_pos_y) {
         av_log(avctx, AV_LOG_ERROR, "given picture at position (%d,%d) not at expected position (%d,%d)\n",
                 frame->pos_x, frame->pos_y, 0, s->expected_pos_y);
