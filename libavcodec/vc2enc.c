@@ -1426,8 +1426,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     }
 
     /* Slices */
-    s->num_x = s->plane[0].align_w/s->slice_width;
-    s->num_y = s->plane[0].align_h/s->slice_height;
+    s->num_x = s->plane[0].dwt_width/s->slice_width;
+    s->num_y = s->plane[0].dwt_height/s->slice_height;
 
     if (s->fragment_size) {
         if (s->num_x % s->fragment_size) {
