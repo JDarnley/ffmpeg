@@ -959,6 +959,9 @@ static int import_transform_plane(AVCodecContext *avctx, void *arg, int jobnr, i
     int height = frame->height >> chroma_y_shift;
     int pos_y = frame->pos_y >> chroma_y_shift;
 
+    if (pos_y + height > p->height)
+        height = p->height - pos_y;
+
     load_pixel_data(frame->data[jobnr], p->coef_buf + pos_y*p->coef_stride,
             frame->linesize[jobnr], p->coef_stride,
             p->width, height, s->bpp, s->diff_offset);
@@ -1152,6 +1155,10 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         av_log(avctx, AV_LOG_ERROR, "given picture at position (%d,%d) not at expected position (%d,%d)\n",
                 frame->pos_x, frame->pos_y, 0, s->expected_pos_y);
         return AVERROR(EINVAL);
+    }
+
+    if (frame->pos_y + frame->height > avctx->height) {
+        av_log(avctx, AV_LOG_WARNING, "given %d lines, at (0,%d)\n", frame->height, frame->pos_y);
     }
 
     s->avctx = avctx;
