@@ -1033,15 +1033,14 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
     s->avctx->execute2(s->avctx, import_transform_plane, NULL, NULL, 3);
 
     /* Check how many rows are available. */
-    int rows_available = slice_rows_available(s);
-    if (rows_available <= s->number_of_rows_sent) {
+    if (slice_rows_available(s) <= s->number_of_rows_sent) {
         /* If no rows rows are available return no packet. */
         *got_packet = 0;
         return 0;
     }
 
     /* Create and write packet. */
-    s->num_y_partial = rows_available - s->number_of_rows_sent;
+    s->num_y_partial = slice_rows_available(s) - s->number_of_rows_sent;
     for (y = 0; y < s->num_y_partial; y++)
         for (x = 0; x < s->num_x; x++)
             s->slice_args[y*s->num_x + x].y = y + s->number_of_rows_sent;
