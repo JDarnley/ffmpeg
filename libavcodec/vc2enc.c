@@ -1313,18 +1313,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
-    if ((s->slice_width < (1 << s->wavelet_depth)) ||
-        (s->slice_height < (1 << s->wavelet_depth))) {
-        av_log(avctx, AV_LOG_ERROR, "Slice size is less than wavelet depth\n");
-        return AVERROR(EINVAL);
-    }
-
-    if (avctx->width % s->slice_width || avctx->height % s->slice_height) {
-        av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) not a factor of the frame size (%dx%d)\n",
-                s->slice_width, s->slice_height, avctx->width, avctx->height);
-        return AVERROR(EINVAL);
-    }
-
     if (s->base_vf <= 0) {
         if (avctx->strict_std_compliance < FF_COMPLIANCE_STRICT) {
             s->strict_compliance = s->base_vf = 0;
@@ -1375,12 +1363,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         int alignment      = 1 << s->wavelet_depth;
         Plane *p           = &s->plane[i];
         int hstride        = 1;
-
-        if (slice_w & (alignment-1) || slice_h & (alignment-1)) {
-            av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) for plane %d not a multiple of the wavelet depth (2**%d, %d)\n",
-                    slice_w, slice_h, i, s->wavelet_depth, alignment);
-            return AVERROR(EINVAL);
-        }
 
         p->width      = w;
         p->height     = h;
