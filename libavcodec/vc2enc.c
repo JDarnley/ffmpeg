@@ -103,8 +103,6 @@ typedef struct Plane {
     int dwt_width;
     int dwt_height;
     ptrdiff_t coef_stride;
-    int slice_w, slice_h;
-    int align_w, align_h;
 } Plane;
 
 typedef struct SliceArgs {
@@ -1363,8 +1361,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         int chroma_y_shift = i ? s->chroma_y_shift : 0;
         int w              = avctx->width    >> chroma_x_shift;
         int h              = avctx->height   >> chroma_y_shift;
-        int slice_w        = s->slice_width  >> chroma_x_shift;
-        int slice_h        = s->slice_height >> chroma_y_shift;
         int alignment      = 1 << s->wavelet_depth;
         Plane *p           = &s->plane[i];
         int hstride        = 1;
@@ -1375,13 +1371,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         h             = FFALIGN(h, alignment);
         p->dwt_width  = w; /* TODO: do I need to store these? */
         p->dwt_height = h;
-        p->slice_w    = slice_w;
-        p->slice_h    = slice_h;
 
-        w             = FFALIGN(w, slice_w);
-        h             = FFALIGN(h, slice_h);
-        p->align_w    = w;
-        p->align_h    = h;
         p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
         p->coef_buf = av_mallocz(w*h*sizeof(dwtcoef));
         if (!p->coef_buf)
@@ -1392,8 +1382,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         for (level = s->wavelet_depth-1; level >= 0; level--) {
             w = w >> 1;
             h = h >> 1;
-            slice_w >>= 1;
-            slice_h >>= 1;
             hstride <<= 1;
             for (o = 0; o < 4; o++) {
                 SubBand *b = &p->band[level][o];
