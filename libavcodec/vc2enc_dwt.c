@@ -293,18 +293,15 @@ static av_always_inline void dwt_haar(dwtcoef *data,
                                       const int s)
 {
     int x, y;
-    const ptrdiff_t synth_width  = width  << 1;
-    const ptrdiff_t synth_height = height << 1;
-
-    for (y = 0; y < synth_height; y += 2) {
+    for (y = 0; y < height; y += 2) {
         /* Horizontal synthesis. */
-        for (x = 0; x < synth_width; x += 2) {
+        for (x = 0; x < width; x += 2) {
             data[y*stride + (x+1)*hstride] = (data[y*stride + (x+1)*hstride] << s) -
                                              (data[y*stride + x*hstride] << s);
             data[y*stride + x*hstride] = (data[y*stride + x*hstride] << s) +
                                         ((data[y*stride + (x+1)*hstride] + 1) >> 1);
         }
-        for (x = 0; x < synth_width; x += 2) {
+        for (x = 0; x < width; x += 2) {
             data[(y+1)*stride + (x+1)*hstride] = (data[(y+1)*stride + (x+1)*hstride] << s) -
                                                  (data[(y+1)*stride + x*hstride] << s);
             data[(y+1)*stride + x*hstride] = (data[(y+1)*stride + x*hstride] << s) +
@@ -312,7 +309,7 @@ static av_always_inline void dwt_haar(dwtcoef *data,
         }
 
         /* Vertical synthesis. */
-        for (x = 0; x < synth_width; x++) {
+        for (x = 0; x < width; x++) {
             data[(y + 1)*stride + x*hstride] = data[(y + 1)*stride + x*hstride] -
                                                data[y*stride + x*hstride];
             data[y*stride + x*hstride] = data[y*stride + x*hstride] +
@@ -341,7 +338,7 @@ static void haar_transform(dwtcoef *data,
         const int shift)
 {
     data += stride * progress->vfilter_stage1;
-    dwt_haar(data, stride, width/2, (y-progress->vfilter_stage1)/2, hstride, shift);
+    dwt_haar(data, stride, width, y-progress->vfilter_stage1, hstride, shift);
     progress->vfilter_stage1 = y;
 }
 
