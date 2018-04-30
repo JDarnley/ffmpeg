@@ -1312,6 +1312,19 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
+    if (avctx->width % s->slice_width || avctx->height % s->slice_height) {
+        av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) not a factor of the frame size (%dx%d)\n",
+                s->slice_width, s->slice_height, avctx->width, avctx->height);
+        // return AVERROR(EINVAL);
+    }
+
+    if (s->slice_width & ((1 << s->wavelet_depth)  -1)
+            || s->slice_height & ((1 << s->wavelet_depth)  -1)) {
+        av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) not a multiple of the wavelet depth (2**%d, %d)\n",
+                s->slice_width, s->slice_height, s->wavelet_depth, 1 << s->wavelet_depth);
+        // return AVERROR(EINVAL);
+    }
+
     if (s->base_vf <= 0) {
         if (avctx->strict_std_compliance < FF_COMPLIANCE_STRICT) {
             s->strict_compliance = s->base_vf = 0;
