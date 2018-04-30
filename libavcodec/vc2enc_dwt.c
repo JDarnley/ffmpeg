@@ -66,6 +66,7 @@ static void haar_transform(dwtcoef *data,
         int y, struct progress *progress,
         const int shift)
 {
+    y &= ~1;
     data += stride * progress->vfilter_stage1;
     dwt_haar(data, stride, width/2, (y-progress->vfilter_stage1)/2, hstride, shift);
     progress->vfilter_stage1 = y;
