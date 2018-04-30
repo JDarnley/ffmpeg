@@ -980,14 +980,15 @@ static int import_transform_plane(AVCodecContext *avctx, void *arg, int jobnr, i
 
 static int slice_rows_available(const VC2EncContext *s)
 {
-    int y, p;
-    const int depth = s->wavelet_depth;
+    int y, p, depth;
 
-    for (y = 0; y < s->num_y; y++) {
-        for (p = 0; p < 3; p++) {
-            int height = s->plane[p].dwt_height >> depth;
-            if (height*(y+1)/s->num_y * 2 > s->transform_args[p].t.progress[depth-1].vfilter_stage1)
-                return y;
+    for (y = s->number_of_rows_sent; y < s->num_y; y++) {
+        for (p = 0; p < 2; p++) { /* Only check 1 chroma plane */
+            for (depth = s->wavelet_depth; depth > 0; depth--) {
+                int height = s->plane[p].dwt_height >> depth;
+                if (height*(y+1)/s->num_y * 2 > s->transform_args[p].t.progress[depth-1].vfilter_stage1)
+                    return y;
+            }
         }
     }
     return y;
