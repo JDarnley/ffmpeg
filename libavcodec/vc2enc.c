@@ -937,17 +937,20 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
 
     ff_vc2enc_reset_transforms(t);
 
-    for (y = 0; y < p->height; y += 16) {
+#define CHUNK_SIZE 8
+
+    for (y = 0; y < p->height; y += CHUNK_SIZE) {
         load_pixel_data((const uint8_t *)frame_data + offset + y*linesize,
                 p->coef_buf + y*p->coef_stride,
                 linesize, p->coef_stride,
-                p->width, 16, s->bpp, s->diff_offset);
-        if (y+16 > p->height)
+                p->width, CHUNK_SIZE, s->bpp, s->diff_offset);
+        if (y+CHUNK_SIZE >= p->height)
             memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 #if NEW_TRANSFORMS
         ff_vc2enc_transform(t, p->coef_buf,
                 p->coef_stride, p->dwt_width, p->dwt_height,
-                FFMIN(y+16, p->dwt_height), s->wavelet_depth, idx);
+                (y+CHUNK_SIZE >= p->height) ? p->dwt_height : y+CHUNK_SIZE,
+                s->wavelet_depth, idx);
 #endif
     }
 
