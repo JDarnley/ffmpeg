@@ -404,7 +404,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
         case VC2_TRANSFORM_HAAR:
             for (level = 0; level < depth; level++) {
                 int hstride = 1 << level;
-                int y_l = y >> level;
+                int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
                         hstride, y_l, &t->progress[level], 0);
@@ -414,7 +414,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
         case VC2_TRANSFORM_HAAR_S:
             for (level = 0; level < depth; level++) {
                 int hstride = 1 << level;
-                int y_l = y >> level;
+                int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
                         hstride, y_l, &t->progress[level], 1);
