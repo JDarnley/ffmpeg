@@ -1141,12 +1141,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     if (s->interlaced)
         av_log(avctx, AV_LOG_WARNING, "Interlacing enabled!\n");
 
-    if ((s->slice_width  & (s->slice_width  - 1)) ||
-        (s->slice_height & (s->slice_height - 1))) {
-        av_log(avctx, AV_LOG_ERROR, "Slice size is not a power of two!\n");
-        return AVERROR_UNKNOWN;
-    }
-
     if ((s->slice_width > avctx->width) ||
         (s->slice_height > avctx->height)) {
         av_log(avctx, AV_LOG_ERROR, "Slice size is bigger than the image!\n");
