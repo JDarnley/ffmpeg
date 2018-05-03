@@ -731,8 +731,8 @@ static int dirac_unpack_idwt_params(DiracContext *s)
     }
 
     /* Min slice size is 8 pixels, so it's a sane limit */
-    CHECKEDREAD(s->num_x, (tmp <= 0 || (tmp > (s->avctx->width /8))), "Invalid number of horizontal slices\n");
-    CHECKEDREAD(s->num_y, (tmp <= 0 || (tmp > (s->avctx->height/8))), "Invalid number of vertical slices\n");
+    CHECKEDREAD(s->num_x, (tmp <= 0 || (tmp > (FFALIGN(s->avctx->width , 1 << s->wavelet_depth)/8))), "Invalid number of horizontal slices\n");
+    CHECKEDREAD(s->num_y, (tmp <= 0 || (tmp > (FFALIGN(s->avctx->height, 1 << s->wavelet_depth)/8))), "Invalid number of vertical slices\n");
 
     s->prefix_bytes = get_interleaved_ue_golomb(gb);
 
