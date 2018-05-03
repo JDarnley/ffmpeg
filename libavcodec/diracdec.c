@@ -1062,7 +1062,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
                 if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
                     return ret;
-                av_log(avctx, AV_LOG_INFO, "allocated progressive buf\n");
+                av_log(avctx, AV_LOG_DEBUG, "allocated progressive buf\n");
                 pic->display_picture_number = pict_num;
                 s->current_picture = pic;
                 s->cur_field = 0;
@@ -1078,7 +1078,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
                     if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
                         return ret;
-                    av_log(avctx, AV_LOG_INFO, "allocated interlaced buf\n");
+                    av_log(avctx, AV_LOG_DEBUG, "allocated interlaced buf\n");
                     s->prev_field = pic;
                 } else {
                     if (!s->current_picture || !s->prev_field) {
