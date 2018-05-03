@@ -780,7 +780,8 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
     const int idx     = (s->bit_depth - 8) >> 1;
     const int ostride = p->stride << s->field_coding;
     /* TODO: better wavelets will need more overlap fudging here.  Even Haar
-     * needed 1.  Was that because it starts at -1? */
+     * needed 1.  Was that because it starts at -1?  Is this the support field
+     * in the DWTContext struct? */
     int overlap = p->decoded_row_count != p->height;
 
     /* Interleaves the fields */
