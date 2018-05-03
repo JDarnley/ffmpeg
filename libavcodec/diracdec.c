@@ -597,15 +597,14 @@ static int decode_lowdelay(DiracContext *s)
             avctx->execute2(avctx, decode_hq_slice_single_wrap, slices, NULL, slice_num);
         }
 
-        /* FIXME: might need correcting when slice sizes are not a factor of
-         * plane height and need to check padding.  Also assumes an entire row
-         * of slices is obtained here.  That may be a bad assumption. */
+        /* FIXME: Asumes an entire row of slices is obtained here.  That may be
+         * a bad assumption. */
         if (x_offset == s->num_x-1) {
             for (i = 0; i < 3; i++)
-                s->plane[i].decoded_row_count = s->plane[i].height * (y_offset+1) / s->num_y;
+                s->plane[i].decoded_row_count = ((s->plane[i].height >> s->wavelet_depth) * (y_offset+1) / s->num_y) << s->wavelet_depth;
         } else {
             for (i = 0; i < 3; i++)
-                s->plane[i].decoded_row_count = s->plane[i].height * (y_offset) / s->num_y;
+                s->plane[i].decoded_row_count = ((s->plane[i].height >> s->wavelet_depth) * (y_offset) / s->num_y) << s->wavelet_depth;
         }
 
     } else {
