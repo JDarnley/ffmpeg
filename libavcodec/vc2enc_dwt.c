@@ -244,25 +244,24 @@ static void legall_5_3_transform(dwtcoef *data,
     progress->vfilter_stage2 = line;
 
     /* Vertical synthesis: Lifting stage 1. */
-    data = data_original + 2*stride*progress->vfilter_stage1;
+    data = data_original + stride*progress->vfilter_stage1;
     line = progress->vfilter_stage1;
     if (line == 0 && progress->vfilter_stage2 > 0) {
         for (x = 0; x < synth_width; x++)
             data[x*hstride] = LIFT1(data[x*hstride + stride],
                                     data[x*hstride],
                                     data[x*hstride + stride]);
-        line++;
+        line += 2;
     }
     data += stride;
 
-    line_max /= 2;
     if (y != synth_height)
-        line_max -= 1;
+        line_max -= 2;
     /* Why subtract 1 here?  It should be able to filter the same number of
      * lines because it is filtering the one above.  I don't get it!  The block
      * above doesn't need any of the processed here to remain unmodified, it is
      * done with them. */
-    for (; line < line_max; line++) {
+    for (; line < line_max; line += 2) {
         for (x = 0; x < synth_width; x++)
             data[x*hstride + stride] = LIFT1(data[x*hstride],
                                              data[x*hstride + stride],
@@ -398,7 +397,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
                 if (y == height)
                     y_l /= 2;
                 else
-                    y_l = t->progress[level].vfilter_stage1;
+                    y_l = t->progress[level].vfilter_stage1/2;
             }
             break;
 
