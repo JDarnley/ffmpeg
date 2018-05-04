@@ -216,9 +216,9 @@ static void legall_5_3_transform(dwtcoef *data,
     progress->hfilter = line;
 
     /* Vertical synthesis: Lifting stage 2. */
-    data = data_original + 2*stride*progress->vfilter_stage2;
-    line_max = y/2 - 1;
-    for (line = progress->vfilter_stage2; line < line_max; line++) {
+    data = data_original + stride*progress->vfilter_stage2;
+    line_max = line - 2;
+    for (line = progress->vfilter_stage2; line < line_max; line += 2) {
         for (x = 0; x < synth_width; x++)
             data[x*hstride+stride] = LIFT2(data[x*hstride],
                                            data[x*hstride + stride],
@@ -234,12 +234,12 @@ static void legall_5_3_transform(dwtcoef *data,
     // line13 = line13 - line12 + line14, line=6
 
     // line15 = line15 - line14 + line16, line=7
-    if (line == height-1) {
+    if (line == synth_height - 2) {
         for (x = 0; x < synth_width; x++)
             data[x*hstride + stride] = LIFT2(data[x*hstride],
                                              data[x*hstride + stride],
                                              data[x*hstride]);
-        line++;
+        line += 2;
     }
     progress->vfilter_stage2 = line;
 
@@ -255,6 +255,7 @@ static void legall_5_3_transform(dwtcoef *data,
     }
     data += stride;
 
+    line_max /= 2;
     if (y != synth_height)
         line_max -= 1;
     /* Why subtract 1 here?  It should be able to filter the same number of
