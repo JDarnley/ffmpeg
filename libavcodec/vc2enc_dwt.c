@@ -25,6 +25,100 @@
 #include "dirac.h"
 #include "vc2enc_dwt.h"
 
+/* LeGall (5,3), VC2_TRANSFORM_5_3 */
+
+#define LIFT1(val0, val1, val2)\
+    ((val1) + ((val0) + (val2) + 2 >> 2))
+
+#define LIFT2(val0, val1, val2)\
+    ((val1) - ((val0) + (val2) + 1 >> 1))
+
+static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
+        int width, int height, int hstride, int y, struct progress *progress)
+{
+    int x, line, line_max;
+    dwtcoef *data_original = data;
+    const ptrdiff_t synth_width  = width  << 1;
+    const ptrdiff_t synth_height = height << 1;
+
+    /* Horizontal synthesis. */
+    data = data_original + stride*progress->hfilter;
+    for (line = progress->hfilter; line < y; line++) {
+        /* Lifting stage 2. */
+        for (x = 0; x < width - 1; x++)
+            data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
+                                          data[(2*x+1)*hstride] << 1,
+                                          data[(2*x+2)*hstride] << 1);
+        data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
+                                      data[(2*x+1)*hstride] << 1,
+                                      data[(2*x  )*hstride] << 1);
+
+        /* Lifting stage 1. */
+        data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
+        for (x = 1; x < width; x++)
+            data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
+                                      data[(2*x  )*hstride] << 1,
+                                      data[(2*x+1)*hstride]);
+
+        data += stride;
+    }
+    progress->hfilter = line;
+
+    /* Vertical synthesis: Lifting stage 2. */
+    data = data_original + stride*progress->vfilter_stage2;
+    line_max = line - 2;
+    for (line = progress->vfilter_stage2; line < line_max; line += 2) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride+stride] = LIFT2(data[x*hstride],
+                                           data[x*hstride + stride],
+                                           data[x*hstride + stride*2]);
+        data += stride*2;
+    }
+    if (line == synth_height - 2) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride + stride] = LIFT2(data[x*hstride],
+                                             data[x*hstride + stride],
+                                             data[x*hstride]);
+        line += 2;
+    }
+    progress->vfilter_stage2 = line;
+
+    /* Vertical synthesis: Lifting stage 1. */
+    data = data_original + stride*progress->vfilter_stage1;
+    line = progress->vfilter_stage1;
+    if (line == 0 && progress->vfilter_stage2 > 0) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride] = LIFT1(data[x*hstride + stride],
+                                    data[x*hstride],
+                                    data[x*hstride + stride]);
+        line += 2;
+    }
+    data += stride;
+
+    if (y != synth_height)
+        line_max -= 2;
+    /* Why subtract here?  It should be able to filter the same number of lines
+     * because it is filtering the one above.  I don't get it!  The block above
+     * doesn't need any of the lines processed here to remain unmodified, it is
+     * done with them. */
+    for (; line < line_max; line += 2) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride + stride] = LIFT1(data[x*hstride],
+                                             data[x*hstride + stride],
+                                             data[x*hstride + stride*2]);
+        data += stride*2;
+    }
+
+    /* Fudge it for the progress use in vc2enc.c */
+    if (y == synth_height)
+        progress->vfilter_stage1 = y;
+    else
+        progress->vfilter_stage1 = line;
+}
+
+#undef LIFT1
+#undef LIFT2
+
 /* Haar, VC2_TRANSFORM_HAAR, VC2_TRANSFORM_HAAR_S */
 
 static av_always_inline void dwt_haar(dwtcoef *data,
@@ -85,9 +179,24 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
         ptrdiff_t stride, int width, int height,
         int y, const int depth, const enum VC2TransformType type)
 {
-    int level;
+    int level, y_l = y;
 
     switch (type) {
+        case VC2_TRANSFORM_5_3:
+            for (level = 0; level < depth; level++) {
+                ptrdiff_t stride_l = stride << level;
+                int width_l = width >> level;
+                int height_l = height >> level;
+                int hstride = 1 << level;
+
+                legall_5_3_transform(data, stride_l,
+                        width_l/2, height_l/2,
+                        hstride, y_l, &t->progress[level]);
+
+                y_l = t->progress[level].vfilter_stage1/2 & ~1;
+            }
+            break;
+
         case VC2_TRANSFORM_HAAR:
             for (level = 0; level < depth; level++) {
                 int hstride = 1 << level;
