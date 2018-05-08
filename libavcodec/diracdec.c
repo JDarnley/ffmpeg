@@ -782,7 +782,9 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
     /* TODO: better wavelets will need more overlap fudging here.  Even Haar
      * needed 1.  Was that because it starts at -1?  Is this the support field
      * in the DWTContext struct? */
-    int overlap = p->decoded_row_count != p->height;
+    int overlap = 0;
+    if (p->decoded_row_count != p->height)
+        overlap = p->idwt_ctx.support << s->wavelet_depth;
 
     /* Interleaves the fields */
     frame += s->cur_field * p->stride;
