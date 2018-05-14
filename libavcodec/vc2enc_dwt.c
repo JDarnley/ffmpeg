@@ -171,7 +171,7 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
 
     /* Vertical synthesis: Lifting stage 2. */
     data = data_original;
-    line_max = y/2 - 2;
+    line_max = y - 4;
     line = progress->vfilter_stage2;
     if (line == 0 && line_max > 0) {
         for (x = 0; x < synth_width; x++)
@@ -180,11 +180,10 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
                     data[x*hstride + stride],
                     data[x*hstride + 2*stride],
                     data[x*hstride + 4*stride]);
-        line++;
+        line += 2;
     }
-
-    data += 2*stride*(line-1);
-    for (/* do nothing */; line < line_max; line++) {
+    data += stride*(line - 2);
+    for (/* do nothing */; line < line_max; line += 2) {
         for (x = 0; x < synth_width; x++)
             data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
                                                data[x*hstride + 2*stride],
@@ -193,7 +192,7 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
                                                data[x*hstride + 6*stride]);
         data += stride*2;
     }
-    if (line == height - 2) {
+    if (line == synth_height - 4) {
         for (x = 0; x < synth_width; x++) {
             data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
                                                data[x*hstride + 2*stride],
@@ -206,12 +205,12 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
                                                data[x*hstride + 4*stride],
                                                data[x*hstride + 4*stride]);
         }
-        line += 2;
+        line += 4;
     }
     progress->vfilter_stage2 = line;
 
     /* Vertical synthesis: Lifting stage 1. */
-    line_max = line - (y != synth_height);
+    line_max = line/2 - (y != synth_height);
     line = progress->vfilter_stage1;
     data = data_original;
     if (line == 0 && line_max > 0) {
