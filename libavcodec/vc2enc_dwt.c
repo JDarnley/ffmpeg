@@ -174,13 +174,13 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     line_max = y/2 - 2;
     line = progress->vfilter_stage2;
     if (line == 0 && line_max > 0) {
-    for (x = 0; x < synth_width; x++)
-        data[x*hstride + stride] = LIFT2(data[x*hstride],
-                                         data[x*hstride],
-                                         data[x*hstride + stride],
-                                         data[x*hstride + 2*stride],
-                                         data[x*hstride + 4*stride]);
-    line++;
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride + stride] = LIFT2(data[x*hstride],
+                    data[x*hstride],
+                    data[x*hstride + stride],
+                    data[x*hstride + 2*stride],
+                    data[x*hstride + 4*stride]);
+        line++;
     }
 
     data += 2*stride*(line-1);
@@ -194,18 +194,18 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
         data += stride*2;
     }
     if (line == height - 2) {
-    for (x = 0; x < synth_width; x++) {
-        data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
-                                           data[x*hstride + 2*stride],
-                                           data[x*hstride + 3*stride],
-                                           data[x*hstride + 4*stride],
-                                           data[x*hstride + 4*stride]);
-        data[x*hstride + 5*stride] = LIFT2(data[x*hstride + 2*stride],
-                                           data[x*hstride + 4*stride],
-                                           data[x*hstride + 5*stride],
-                                           data[x*hstride + 4*stride],
-                                           data[x*hstride + 4*stride]);
-    }
+        for (x = 0; x < synth_width; x++) {
+            data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
+                                               data[x*hstride + 2*stride],
+                                               data[x*hstride + 3*stride],
+                                               data[x*hstride + 4*stride],
+                                               data[x*hstride + 4*stride]);
+            data[x*hstride + 5*stride] = LIFT2(data[x*hstride + 2*stride],
+                                               data[x*hstride + 4*stride],
+                                               data[x*hstride + 5*stride],
+                                               data[x*hstride + 4*stride],
+                                               data[x*hstride + 4*stride]);
+        }
         line += 2;
     }
     progress->vfilter_stage2 = line;
