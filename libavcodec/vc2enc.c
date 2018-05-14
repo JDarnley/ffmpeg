@@ -943,7 +943,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
         load_pixel_data((const uint8_t *)frame_data + offset + y*linesize,
                 p->coef_buf + y*p->coef_stride,
                 linesize, p->coef_stride,
-                p->width, CHUNK_SIZE, s->bpp, s->diff_offset);
+                p->width, FFMIN(CHUNK_SIZE, p->height-y), s->bpp, s->diff_offset);
         if (y+CHUNK_SIZE >= p->height)
             memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
 #if NEW_TRANSFORMS
