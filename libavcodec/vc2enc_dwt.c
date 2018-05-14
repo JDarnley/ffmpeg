@@ -210,7 +210,9 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     progress->vfilter_stage2 = line;
 
     /* Vertical synthesis: Lifting stage 1. */
-    line_max = line/2 - (y != synth_height);
+    line_max = line;
+    if (y != synth_height)
+        line_max -= 2;
     line = progress->vfilter_stage1;
     data = data_original;
     if (line == 0 && line_max > 0) {
@@ -218,11 +220,11 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
             data[x*hstride] = LIFT1(data[x*hstride + stride],
                                     data[x*hstride],
                                     data[x*hstride + stride]);
-        line++;
+        line += 2;
     }
 
-    data += 2*line*stride - stride;
-    for (; line < line_max; line++) {
+    data += line*stride - stride;
+    for (; line < line_max; line += 2) {
         for (x = 0; x < synth_width; x++)
             data[x*hstride + stride] = LIFT1(data[x*hstride],
                                              data[x*hstride + stride],
@@ -508,10 +510,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
                         width_l/2, height_l/2,
                         hstride, y_l, &t->progress[level]);
 
-                if (y == height)
-                    y_l /= 2;
-                else
-                    y_l = t->progress[level].vfilter_stage1;
+                    y_l = t->progress[level].vfilter_stage1 / 2;
             }
             break;
 
