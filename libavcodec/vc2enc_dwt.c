@@ -123,6 +123,116 @@ static void vc2_subband_dwt_97(VC2TransformContext *t, dwtcoef *data,
     }
 }
 
+static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
+        ptrdiff_t stride, int width, int height, int hstride,
+        const int y, struct progress *progress)
+{
+    int x, line, line_max;
+    dwtcoef *data_original = data;
+    const ptrdiff_t synth_width  = width  << 1;
+    const ptrdiff_t synth_height = height << 1;
+
+    /* Horizontal synthesis. */
+    data = data_original + stride*progress->hfilter;
+    for (line = progress->hfilter; line < y; line++) {
+        /* Lifting stage 2. */
+        data[hstride] = LIFT2(data[0] << 1,
+                              data[0] << 1,
+                              data[1*hstride] << 1,
+                              data[2*hstride] << 1,
+                              data[4*hstride] << 1);
+        for (x = 1; x < width - 2; x++)
+            data[(2*x + 1)*hstride] = LIFT2(data[(2*x - 2)*hstride] << 1,
+                                            data[(2*x    )*hstride] << 1,
+                                            data[(2*x + 1)*hstride] << 1,
+                                            data[(2*x + 2)*hstride] << 1,
+                                            data[(2*x + 4)*hstride] << 1);
+        data[(2*x + 1)*hstride] = LIFT2(data[(2*x - 2)*hstride] << 1,
+                                        data[(2*x    )*hstride] << 1,
+                                        data[(2*x + 1)*hstride] << 1,
+                                        data[(2*x + 2)*hstride] << 1,
+                                        data[(2*x + 2)*hstride] << 1);
+        data[(2*x + 3)*hstride] = LIFT2(data[(2*x    )*hstride] << 1,
+                                        data[(2*x + 2)*hstride] << 1,
+                                        data[(2*x + 3)*hstride] << 1,
+                                        data[(2*x + 2)*hstride] << 1,
+                                        data[(2*x + 2)*hstride] << 1);
+
+        /* Lifting stage 1. */
+        data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
+        for (x = 1; x < width; x++)
+            data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
+                                      data[(2*x  )*hstride] << 1,
+                                      data[(2*x+1)*hstride]);
+
+        data += stride;
+    }
+    progress->hfilter = line;
+
+    /* Vertical synthesis: Lifting stage 2. */
+    data = data_original;
+    line_max = y/2 - 2;
+    line = progress->vfilter_stage2;
+    if (line == 0 && line_max > 0) {
+    for (x = 0; x < synth_width; x++)
+        data[x*hstride + stride] = LIFT2(data[x*hstride],
+                                         data[x*hstride],
+                                         data[x*hstride + stride],
+                                         data[x*hstride + 2*stride],
+                                         data[x*hstride + 4*stride]);
+    line++;
+    }
+
+    data += 2*stride*(line-1);
+    for (/* do nothing */; line < line_max; line++) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
+                                               data[x*hstride + 2*stride],
+                                               data[x*hstride + 3*stride],
+                                               data[x*hstride + 4*stride],
+                                               data[x*hstride + 6*stride]);
+        data += stride*2;
+    }
+    if (line == height - 2) {
+    for (x = 0; x < synth_width; x++) {
+        data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
+                                           data[x*hstride + 2*stride],
+                                           data[x*hstride + 3*stride],
+                                           data[x*hstride + 4*stride],
+                                           data[x*hstride + 4*stride]);
+        data[x*hstride + 5*stride] = LIFT2(data[x*hstride + 2*stride],
+                                           data[x*hstride + 4*stride],
+                                           data[x*hstride + 5*stride],
+                                           data[x*hstride + 4*stride],
+                                           data[x*hstride + 4*stride]);
+    }
+        line += 2;
+    }
+    progress->vfilter_stage2 = line;
+
+    /* Vertical synthesis: Lifting stage 1. */
+    line_max = line - (y != synth_height);
+    line = progress->vfilter_stage1;
+    data = data_original;
+    if (line == 0 && line_max > 0) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride] = LIFT1(data[x*hstride + stride],
+                                    data[x*hstride],
+                                    data[x*hstride + stride]);
+        line++;
+    }
+
+    data += 2*line*stride - stride;
+    for (; line < line_max; line++) {
+        for (x = 0; x < synth_width; x++)
+            data[x*hstride + stride] = LIFT1(data[x*hstride],
+                                             data[x*hstride + stride],
+                                             data[x*hstride + stride*2]);
+        data += stride*2;
+    }
+    progress->vfilter_stage1 = line;
+}
+
 #undef LIFT1
 #undef LIFT2
 
@@ -387,6 +497,25 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
     int level, y_l = y;
 
     switch (type) {
+        case VC2_TRANSFORM_9_7:
+            for (level = 0; level < depth; level++) {
+                ptrdiff_t stride_l = stride << level;
+                int width_l = width >> level;
+                int height_l = height >> level;
+                int hstride = 1 << level;
+                y_l &= ~1;
+
+                deslauriers_dubuc_9_7_transform(data, stride_l,
+                        width_l/2, height_l/2,
+                        hstride, y_l, &t->progress[level]);
+
+                if (y == height)
+                    y_l /= 2;
+                else
+                    y_l = t->progress[level].vfilter_stage1;
+            }
+            break;
+
         case VC2_TRANSFORM_5_3:
             for (level = 0; level < depth; level++) {
                 ptrdiff_t stride_l = stride << level;
