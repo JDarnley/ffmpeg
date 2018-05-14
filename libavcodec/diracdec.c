@@ -771,6 +771,24 @@ static int dirac_unpack_idwt_params(DiracContext *s)
     return 0;
 }
 
+static inline int idwt_overlap(const DiracContext *s, const Plane *p)
+{
+    if (p->decoded_row_count == p->height)
+        return 0;
+
+    switch (s->wavelet_idx + 2) {
+        case DWT_DIRAC_DD9_7:
+            return (6 << s->wavelet_depth) + 1; /* should be: 13, 25, 49, 81 */
+        case DWT_DIRAC_LEGALL5_3:
+            return (2 << s->wavelet_depth) + 1; /* should be: 5, 9, 17, 33 */
+        case DWT_DIRAC_HAAR0:
+        case DWT_DIRAC_HAAR1:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
     int y;
@@ -782,9 +800,10 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
     /* TODO: better wavelets will need more overlap fudging here.  Even Haar
      * needed 1.  Was that because it starts at -1?  Is this the support field
      * in the DWTContext struct? */
-    int overlap = 0;
-    if (p->decoded_row_count != p->height)
-        overlap = p->idwt_ctx.support << s->wavelet_depth;
+    int overlap = idwt_overlap(s, p);
+
+    if (p->decoded_row_count - overlap < 0)
+        return 0;
 
     /* Interleaves the fields */
     frame += s->cur_field * p->stride;
