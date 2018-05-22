@@ -29,6 +29,8 @@
 #include "vc2enc_dwt.h"
 #include "diractab.h"
 
+#define MTU (1440 - 25 /* "BBCD and fragment headers */ - 16 /* RTP and ext headers */)
+
 /* Total range is -COEF_LUT_TAB to +COEFF_LUT_TAB, but total tab size is half
  * (COEF_LUT_TAB*DIRAC_MAX_QUANT_INDEX), as the sign is appended during encoding */
 #define COEF_LUT_TAB 2048
@@ -794,7 +796,7 @@ static int calc_slice_sizes(VC2EncContext *s)
             bits  = count_hq_slice(args, new_idx);
             bytes = SSIZE_ROUND(bits >> 3);
             diff  = bytes - prev_bytes;
-            if ((bytes_left - diff) > 0) {
+            if ((bytes_left - diff) > 0 && bytes < MTU) {
                 args->quant_idx = new_idx;
                 args->bytes = bytes;
                 bytes_left -= diff;
@@ -1136,7 +1138,7 @@ static av_cold int vc2_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         /* preliminary max slice size (frame_max_bytes/number_of_slices) */
         s->slice_max_bytes = slice_ceil = FFMIN(
                 av_rescale(s->frame_max_bytes, 1, s->num_x * s->num_y),
-                1440 - 25 /* "BBCD and fragment headers */ - 16 /* RTP and ext headers */
+                MTU
                 );
 
         /* Find an appropriate size scaler */
