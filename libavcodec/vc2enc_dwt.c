@@ -162,14 +162,12 @@ static void legall_5_3_transform(dwtcoef *data,
 {
     int x, line, line_max;
     dwtcoef *data_original = data;
-    const ptrdiff_t synth_width  = width  << 1;
-    const ptrdiff_t synth_height = height << 1;
 
     /* Horizontal synthesis. */
     data = data_original + stride*progress->hfilter;
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
-        for (x = 0; x < width - 1; x++)
+        for (x = 0; x < width/2 - 1; x++)
             data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
                                           data[(2*x+1)*hstride] << 1,
                                           data[(2*x+2)*hstride] << 1);
@@ -179,7 +177,7 @@ static void legall_5_3_transform(dwtcoef *data,
 
         /* Lifting stage 1. */
         data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
-        for (x = 1; x < width; x++)
+        for (x = 1; x < width/2; x++)
             data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
                                       data[(2*x  )*hstride] << 1,
                                       data[(2*x+1)*hstride]);
@@ -192,7 +190,7 @@ static void legall_5_3_transform(dwtcoef *data,
     data = data_original + stride*progress->vfilter_stage2;
     line_max = y - 2;
     for (line = progress->vfilter_stage2; line < line_max; line += 2) {
-        for (x = 0; x < synth_width; x++)
+        for (x = 0; x < width; x++)
             data[x*hstride+stride] = LIFT2(data[x*hstride],
                                            data[x*hstride + stride],
                                            data[x*hstride + stride*2]);
@@ -207,8 +205,8 @@ static void legall_5_3_transform(dwtcoef *data,
     // line13 = line13 - line12 + line14, line=6
 
     // line15 = line15 - line14 + line16, line=7
-    if (line == synth_height - 2) {
-        for (x = 0; x < synth_width; x++)
+    if (line == height - 2) {
+        for (x = 0; x < width; x++)
             data[x*hstride + stride] = LIFT2(data[x*hstride],
                                              data[x*hstride + stride],
                                              data[x*hstride]);
@@ -221,7 +219,7 @@ static void legall_5_3_transform(dwtcoef *data,
     line = progress->vfilter_stage1;
     data = data_original;
     if (line == 0 && line_max > 0) {
-        for (x = 0; x < synth_width; x++)
+        for (x = 0; x < width; x++)
             data[x*hstride] = LIFT1(data[x*hstride + stride],
                                     data[x*hstride],
                                     data[x*hstride + stride]);
@@ -230,7 +228,7 @@ static void legall_5_3_transform(dwtcoef *data,
 
     data += line*stride - stride;
     for (; line < line_max; line += 2) {
-        for (x = 0; x < synth_width; x++)
+        for (x = 0; x < width; x++)
             data[x*hstride + stride] = LIFT1(data[x*hstride],
                                              data[x*hstride + stride],
                                              data[x*hstride + stride*2]);
@@ -346,23 +344,10 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
 
         case VC2_TRANSFORM_5_3:
             for (level = 0; level < depth; level++) {
-                ptrdiff_t stride_l = stride << level;
-                int width_l = width >> level;
-                int height_l = height >> level;
-                int hstride = 1 << level;
-
-                if (y_l != height_l
-                        && y_l < t->progress[level].hfilter + 2)
-                    break;
-
-                legall_5_3_transform(data, stride_l,
-                        width_l/2, height_l/2,
-                        hstride, y_l, &t->progress[level]);
-
-                if (y == height)
-                    y_l /= 2;
-                else
-                    y_l = t->progress[level].vfilter_stage1/2;
+                legall_5_3_transform(data, stride << level,
+                        width >> level, height >> level,
+                        1 << level, y_l, &t->progress[level]);
+                y_l = t->progress[level].vfilter_stage1 / 2;
             }
             break;
 
