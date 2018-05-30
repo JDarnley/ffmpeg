@@ -923,7 +923,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
     const int idx = s->wavelet_idx;
 
     ptrdiff_t linesize = transform_dat->istride;
-    int level, offset, y;
+    int offset, y;
 
     if (field == 1) {
         offset = 0;
@@ -944,23 +944,15 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
                 p->coef_buf + y*p->coef_stride,
                 linesize, p->coef_stride,
                 p->width, FFMIN(CHUNK_SIZE, p->height-y), s->bpp, s->diff_offset);
+
         if (y+CHUNK_SIZE >= p->height)
             memset(p->coef_buf + p->height*p->coef_stride, 0, p->coef_stride * (p->dwt_height - p->height) * sizeof(dwtcoef));
-#if NEW_TRANSFORMS
+
         ff_vc2enc_transform(t, p->coef_buf,
                 p->coef_stride, p->dwt_width, p->dwt_height,
                 (y+CHUNK_SIZE >= p->height) ? p->dwt_height : y+CHUNK_SIZE,
                 s->wavelet_depth, idx);
-#endif
     }
-
-#if !NEW_TRANSFORMS
-    for (level = s->wavelet_depth-1; level >= 0; level--) {
-        const SubBand *b = &p->band[level][0];
-        t->vc2_subband_dwt[idx](t, p->coef_buf, b->stride >> 1,
-                                b->width, b->height, b->hstride >> 1);
-    }
-#endif
 
     return 0;
 }

@@ -25,8 +25,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NEW_TRANSFORMS 1
-
 typedef int32_t dwtcoef;
 
 enum VC2TransformType {
@@ -44,10 +42,6 @@ enum VC2TransformType {
 typedef struct VC2TransformContext {
     dwtcoef *buffer;
     int padding;
-    void (*vc2_subband_dwt[VC2_TRANSFORMS_NB])(struct VC2TransformContext *t,
-                                               dwtcoef *data, ptrdiff_t stride,
-                                               int width, int height,
-                                               const ptrdiff_t hstride);
     struct progress {
         int hfilter, vfilter_stage1, vfilter_stage2;
     } progress[MAX_DWT_LEVELS];
