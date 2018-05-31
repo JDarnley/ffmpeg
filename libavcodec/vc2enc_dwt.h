@@ -47,8 +47,7 @@ typedef struct VC2TransformContext {
     } progress[MAX_DWT_LEVELS];
 } VC2TransformContext;
 
-int  ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
-                               int p_width, int p_height,
+int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_stride, int p_height,
                                int slice_w, int slice_h);
 void ff_vc2enc_reset_transforms(VC2TransformContext *s);
 void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,

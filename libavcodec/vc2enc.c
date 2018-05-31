@@ -795,8 +795,8 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
         put_bits(pb, 8, 0);
         for (level = 0; level < s->wavelet_depth; level++) {
             for (orientation = !!level; orientation < 4; orientation++) {
-                SubBand *b = &s->plane[p].band[level][orientation];
-                encode_subband(s, pb, slice_x, slice_y, b,
+                encode_subband(s, pb, slice_x, slice_y,
+                               &s->plane[p].band[level][orientation],
                                quants[level][orientation]);
             }
         }
@@ -1208,7 +1208,6 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         /* DWT init */
         if (ff_vc2enc_init_transforms(&s->transform_args[i].t,
                                       s->plane[i].coef_stride,
-                                      s->plane[i].dwt_width,
                                       s->plane[i].dwt_height,
                                       s->slice_width, s->slice_height))
             goto alloc_fail;

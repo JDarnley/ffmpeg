@@ -335,8 +335,7 @@ static void haar_transform(dwtcoef *data,
 }
 
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
-                                      int p_width, int p_height,
-                                      int slice_w, int slice_h)
+                                      int p_height, int slice_w, int slice_h)
 {
     /* Pad by the slice size, only matters for non-Haar wavelets */
     s->buffer = av_calloc((p_stride + slice_w)*(p_height + slice_h), sizeof(dwtcoef));
