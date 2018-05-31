@@ -54,7 +54,7 @@ static av_always_inline void deinterleave(dwtcoef *data, ptrdiff_t stride,
     ((val2) - (-(val0) + 9*(val1) + 9*(val3) - (val4) + 8 >> 4))
 
 static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
-        ptrdiff_t stride, int width, int height, int hstride,
+        ptrdiff_t stride, int width, int height,
         const int y, struct progress *progress, dwtcoef *temp)
 {
     int x, line, line_max;
@@ -64,34 +64,34 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     data = data_original + stride*progress->hfilter;
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
-        data[hstride] = LIFT2(data[0] << 1,
-                              data[0] << 1,
-                              data[1*hstride] << 1,
-                              data[2*hstride] << 1,
-                              data[4*hstride] << 1);
+        data[1] = LIFT2(data[0] << 1,
+                        data[0] << 1,
+                        data[1] << 1,
+                        data[2] << 1,
+                        data[4] << 1);
         for (x = 1; x < width/2 - 2; x++)
-            data[(2*x + 1)*hstride] = LIFT2(data[(2*x - 2)*hstride] << 1,
-                                            data[(2*x    )*hstride] << 1,
-                                            data[(2*x + 1)*hstride] << 1,
-                                            data[(2*x + 2)*hstride] << 1,
-                                            data[(2*x + 4)*hstride] << 1);
-        data[(2*x + 1)*hstride] = LIFT2(data[(2*x - 2)*hstride] << 1,
-                                        data[(2*x    )*hstride] << 1,
-                                        data[(2*x + 1)*hstride] << 1,
-                                        data[(2*x + 2)*hstride] << 1,
-                                        data[(2*x + 2)*hstride] << 1);
-        data[(2*x + 3)*hstride] = LIFT2(data[(2*x    )*hstride] << 1,
-                                        data[(2*x + 2)*hstride] << 1,
-                                        data[(2*x + 3)*hstride] << 1,
-                                        data[(2*x + 2)*hstride] << 1,
-                                        data[(2*x + 2)*hstride] << 1);
+            data[2*x + 1] = LIFT2(data[2*x - 2] << 1,
+                                  data[2*x    ] << 1,
+                                  data[2*x + 1] << 1,
+                                  data[2*x + 2] << 1,
+                                  data[2*x + 4] << 1);
+        data[2*x + 1] = LIFT2(data[2*x - 2] << 1,
+                              data[2*x    ] << 1,
+                              data[2*x + 1] << 1,
+                              data[2*x + 2] << 1,
+                              data[2*x + 2] << 1);
+        data[2*x + 3] = LIFT2(data[2*x    ] << 1,
+                              data[2*x + 2] << 1,
+                              data[2*x + 3] << 1,
+                              data[2*x + 2] << 1,
+                              data[2*x + 2] << 1);
 
         /* Lifting stage 1. */
-        data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
+        data[0] = LIFT1(data[1], data[0] << 1, data[1]);
         for (x = 1; x < width/2; x++)
-            data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
-                                      data[(2*x  )*hstride] << 1,
-                                      data[(2*x+1)*hstride]);
+            data[2*x] = LIFT1(data[2*x-1],
+                              data[2*x  ] << 1,
+                              data[2*x+1]);
 
         data += stride;
     }
@@ -103,35 +103,35 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     line = progress->vfilter_stage2;
     if (line == 0 && line_max > 0) {
         for (x = 0; x < width; x++)
-            data[x*hstride + stride] = LIFT2(data[x*hstride],
-                    data[x*hstride],
-                    data[x*hstride + stride],
-                    data[x*hstride + 2*stride],
-                    data[x*hstride + 4*stride]);
+            data[x + stride] = LIFT2(data[x],
+                                     data[x],
+                                     data[x + stride],
+                                     data[x + 2*stride],
+                                     data[x + 4*stride]);
         line += 2;
     }
     data += stride*(line - 2);
     for (/* do nothing */; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
-                                               data[x*hstride + 2*stride],
-                                               data[x*hstride + 3*stride],
-                                               data[x*hstride + 4*stride],
-                                               data[x*hstride + 6*stride]);
+            data[x + 3*stride] = LIFT2(data[x],
+                                       data[x + 2*stride],
+                                       data[x + 3*stride],
+                                       data[x + 4*stride],
+                                       data[x + 6*stride]);
         data += stride*2;
     }
     if (line == height - 4) {
         for (x = 0; x < width; x++) {
-            data[x*hstride + 3*stride] = LIFT2(data[x*hstride],
-                                               data[x*hstride + 2*stride],
-                                               data[x*hstride + 3*stride],
-                                               data[x*hstride + 4*stride],
-                                               data[x*hstride + 4*stride]);
-            data[x*hstride + 5*stride] = LIFT2(data[x*hstride + 2*stride],
-                                               data[x*hstride + 4*stride],
-                                               data[x*hstride + 5*stride],
-                                               data[x*hstride + 4*stride],
-                                               data[x*hstride + 4*stride]);
+            data[x + 3*stride] = LIFT2(data[x],
+                                       data[x + 2*stride],
+                                       data[x + 3*stride],
+                                       data[x + 4*stride],
+                                       data[x + 4*stride]);
+            data[x + 5*stride] = LIFT2(data[x + 2*stride],
+                                       data[x + 4*stride],
+                                       data[x + 5*stride],
+                                       data[x + 4*stride],
+                                       data[x + 4*stride]);
         }
         line += 4;
     }
@@ -145,18 +145,18 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     data = data_original;
     if (line == 0 && line_max > 0) {
         for (x = 0; x < width; x++)
-            data[x*hstride] = LIFT1(data[x*hstride + stride],
-                                    data[x*hstride],
-                                    data[x*hstride + stride]);
+            data[x] = LIFT1(data[x + stride],
+                            data[x],
+                            data[x + stride]);
         line += 2;
     }
 
     data += line*stride - stride;
     for (; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride + stride] = LIFT1(data[x*hstride],
-                                             data[x*hstride + stride],
-                                             data[x*hstride + stride*2]);
+            data[x + stride] = LIFT1(data[x],
+                                     data[x + stride],
+                                     data[x + stride*2]);
         data += stride*2;
     }
     progress->vfilter_stage1 = line;
@@ -185,7 +185,7 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     ((val1) - ((val0) + (val2) + 1 >> 1))
 
 static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
-        int width, int height, int hstride, int y, struct progress *progress,
+        int width, int height, int y, struct progress *progress,
         dwtcoef *temp)
 {
     int x, line, line_max;
@@ -196,19 +196,19 @@ static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
         for (x = 0; x < width/2 - 1; x++)
-            data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
-                                          data[(2*x+1)*hstride] << 1,
-                                          data[(2*x+2)*hstride] << 1);
-        data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
-                                      data[(2*x+1)*hstride] << 1,
-                                      data[(2*x  )*hstride] << 1);
+            data[2*x+1] = LIFT2(data[2*x  ] << 1,
+                                data[2*x+1] << 1,
+                                data[2*x+2] << 1);
+        data[2*x+1] = LIFT2(data[2*x  ] << 1,
+                            data[2*x+1] << 1,
+                            data[2*x  ] << 1);
 
         /* Lifting stage 1. */
-        data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
+        data[0] = LIFT1(data[1], data[0] << 1, data[1]);
         for (x = 1; x < width/2; x++)
-            data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
-                                      data[(2*x  )*hstride] << 1,
-                                      data[(2*x+1)*hstride]);
+            data[2*x] = LIFT1(data[2*x-1],
+                              data[2*x  ] << 1,
+                              data[2*x+1]);
 
         data += stride;
     }
@@ -219,16 +219,16 @@ static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
     line_max = y - 2;
     for (line = progress->vfilter_stage2; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride+stride] = LIFT2(data[x*hstride],
-                                           data[x*hstride + stride],
-                                           data[x*hstride + stride*2]);
+            data[x+stride] = LIFT2(data[x],
+                                   data[x + stride],
+                                   data[x + stride*2]);
         data += stride*2;
     }
     if (line == height - 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride + stride] = LIFT2(data[x*hstride],
-                                             data[x*hstride + stride],
-                                             data[x*hstride]);
+            data[x+stride] = LIFT2(data[x],
+                                   data[x + stride],
+                                   data[x]);
         line += 2;
     }
     progress->vfilter_stage2 = line;
@@ -239,18 +239,18 @@ static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
     data = data_original;
     if (line == 0 && line_max > 0) {
         for (x = 0; x < width; x++)
-            data[x*hstride] = LIFT1(data[x*hstride + stride],
-                                    data[x*hstride],
-                                    data[x*hstride + stride]);
+            data[x] = LIFT1(data[x + stride],
+                            data[x],
+                            data[x + stride]);
         line += 2;
     }
 
     data += line*stride - stride;
     for (; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride + stride] = LIFT1(data[x*hstride],
-                                             data[x*hstride + stride],
-                                             data[x*hstride + stride*2]);
+            data[x+stride] = LIFT1(data[x],
+                                   data[x + stride],
+                                   data[x + stride*2]);
         data += stride*2;
     }
     progress->vfilter_stage1 = line;
@@ -274,42 +274,41 @@ static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
 
 static av_always_inline void dwt_haar(dwtcoef *data,
                                       ptrdiff_t stride, int width, int height,
-                                      const ptrdiff_t hstride,
                                       const int s)
 {
     int x, y;
     for (y = 0; y < height; y += 2) {
         /* Horizontal synthesis. */
         for (x = 0; x < width; x += 2) {
-            data[y*stride + (x+1)*hstride] = (data[y*stride + (x+1)*hstride] << s) -
-                                             (data[y*stride + x*hstride] << s);
-            data[y*stride + x*hstride] = (data[y*stride + x*hstride] << s) +
-                                        ((data[y*stride + (x+1)*hstride] + 1) >> 1);
+            data[y*stride + x+1] = (data[y*stride + x+1] << s) -
+                                   (data[y*stride + x] << s);
+            data[y*stride + x] = (data[y*stride + x] << s) +
+                                ((data[y*stride + x+1] + 1) >> 1);
         }
         for (x = 0; x < width; x += 2) {
-            data[(y+1)*stride + (x+1)*hstride] = (data[(y+1)*stride + (x+1)*hstride] << s) -
-                                                 (data[(y+1)*stride + x*hstride] << s);
-            data[(y+1)*stride + x*hstride] = (data[(y+1)*stride + x*hstride] << s) +
-                                            ((data[(y+1)*stride + (x+1)*hstride] + 1) >> 1);
+            data[(y+1)*stride + x+1] = (data[(y+1)*stride + x+1] << s) -
+                                       (data[(y+1)*stride + x] << s);
+            data[(y+1)*stride + x] = (data[(y+1)*stride + x] << s) +
+                                    ((data[(y+1)*stride + x+1] + 1) >> 1);
         }
 
         /* Vertical synthesis. */
         for (x = 0; x < width; x++) {
-            data[(y + 1)*stride + x*hstride] = data[(y + 1)*stride + x*hstride] -
-                                               data[y*stride + x*hstride];
-            data[y*stride + x*hstride] = data[y*stride + x*hstride] +
-                                       ((data[(y + 1)*stride + x*hstride] + 1) >> 1);
+            data[(y + 1)*stride + x] = data[(y + 1)*stride + x] -
+                                       data[y*stride + x];
+            data[y*stride + x] = data[y*stride + x] +
+                               ((data[(y + 1)*stride + x] + 1) >> 1);
         }
     }
 }
 
 static void haar_transform(dwtcoef *data,
-        ptrdiff_t stride, int width, int height, int hstride,
+        ptrdiff_t stride, int width, int height,
         int y, struct progress *progress,
         const int shift, dwtcoef *temp)
 {
     data += stride * progress->deinterleave;
-    dwt_haar(data, stride, width, y-progress->deinterleave, hstride, shift);
+    dwt_haar(data, stride, width, y-progress->deinterleave, shift);
     deinterleave(data, stride, width/2, y-progress->deinterleave, temp);
     progress->deinterleave = y;
 }
@@ -346,7 +345,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 deslauriers_dubuc_9_7_transform(data, stride << level,
                         width >> level, height >> level,
-                        1, y_l, &t->progress[level], t->buffer);
+                        y_l, &t->progress[level], t->buffer);
                 y_l = t->progress[level].vfilter_stage1/2 & ~1;
             }
             break;
@@ -355,7 +354,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 legall_5_3_transform(data, stride << level,
                         width >> level, height >> level,
-                        1, y_l, &t->progress[level], t->buffer);
+                        y_l, &t->progress[level], t->buffer);
                 y_l = t->progress[level].vfilter_stage1/2 & ~1;
             }
             break;
@@ -365,7 +364,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
                 int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        1, y_l, &t->progress[level], 0, t->buffer);
+                        y_l, &t->progress[level], 0, t->buffer);
             }
             break;
 
@@ -374,7 +373,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
                 int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        1, y_l, &t->progress[level], 1, t->buffer);
+                        y_l, &t->progress[level], 1, t->buffer);
             }
             break;
     }
