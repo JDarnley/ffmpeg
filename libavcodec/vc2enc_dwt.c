@@ -175,7 +175,7 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
 
 static void legall_5_3_transform(dwtcoef *data,
         ptrdiff_t stride, int width, int height, int hstride,
-        int y, struct progress *progress
+        int y, struct progress *progress, dwtcoef *temp
         )
 {
     int x, line, line_max;
@@ -264,6 +264,17 @@ static void legall_5_3_transform(dwtcoef *data,
 
     // line16 = line16 + line17 + line15, line=8
     progress->vfilter_stage1 = line;
+
+    line_max = line;
+    if (y != height)
+        line_max -= 1;
+    line = progress->deinterleave;
+    if (line_max < line)
+        return;
+
+    data = data_original + line*stride;
+    deinterleave(data, stride, width/2, line_max-line, temp);
+    progress->deinterleave = line_max;
 }
 
 #undef LIFT1
@@ -359,8 +370,8 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 legall_5_3_transform(data, stride << level,
                         width >> level, height >> level,
-                        1 << level, y_l, &t->progress[level]);
-                y_l = t->progress[level].vfilter_stage1 / 2;
+                        1, y_l, &t->progress[level], t->buffer);
+                y_l = t->progress[level].deinterleave / 2;
             }
             break;
 
