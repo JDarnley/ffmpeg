@@ -295,42 +295,41 @@ static void legall_5_3_transform(dwtcoef *data,
 
 static av_always_inline void dwt_haar(dwtcoef *data,
                                       ptrdiff_t stride, int width, int height,
-                                      const ptrdiff_t hstride,
                                       const int s)
 {
     int x, y;
     for (y = 0; y < height; y += 2) {
         /* Horizontal synthesis. */
         for (x = 0; x < width; x += 2) {
-            data[y*stride + (x+1)*hstride] = (data[y*stride + (x+1)*hstride] << s) -
-                                             (data[y*stride + x*hstride] << s);
-            data[y*stride + x*hstride] = (data[y*stride + x*hstride] << s) +
-                                        ((data[y*stride + (x+1)*hstride] + 1) >> 1);
+            data[y*stride + x+1] = (data[y*stride + x+1] << s) -
+                                   (data[y*stride + x] << s);
+            data[y*stride + x] = (data[y*stride + x] << s) +
+                                ((data[y*stride + x+1] + 1) >> 1);
         }
         for (x = 0; x < width; x += 2) {
-            data[(y+1)*stride + (x+1)*hstride] = (data[(y+1)*stride + (x+1)*hstride] << s) -
-                                                 (data[(y+1)*stride + x*hstride] << s);
-            data[(y+1)*stride + x*hstride] = (data[(y+1)*stride + x*hstride] << s) +
-                                            ((data[(y+1)*stride + (x+1)*hstride] + 1) >> 1);
+            data[(y+1)*stride + x+1] = (data[(y+1)*stride + x+1] << s) -
+                                       (data[(y+1)*stride + x] << s);
+            data[(y+1)*stride + x] = (data[(y+1)*stride + x] << s) +
+                                    ((data[(y+1)*stride + x+1] + 1) >> 1);
         }
 
         /* Vertical synthesis. */
         for (x = 0; x < width; x++) {
-            data[(y + 1)*stride + x*hstride] = data[(y + 1)*stride + x*hstride] -
-                                               data[y*stride + x*hstride];
-            data[y*stride + x*hstride] = data[y*stride + x*hstride] +
-                                       ((data[(y + 1)*stride + x*hstride] + 1) >> 1);
+            data[(y + 1)*stride + x] = data[(y + 1)*stride + x] -
+                                       data[y*stride + x];
+            data[y*stride + x] = data[y*stride + x] +
+                               ((data[(y + 1)*stride + x] + 1) >> 1);
         }
     }
 }
 
 static void haar_transform(dwtcoef *data,
-        ptrdiff_t stride, int width, int height, int hstride,
+        ptrdiff_t stride, int width, int height,
         int y, struct progress *progress,
         const int shift, dwtcoef *temp)
 {
     data += stride * progress->deinterleave;
-    dwt_haar(data, stride, width, y-progress->deinterleave, hstride, shift);
+    dwt_haar(data, stride, width, y-progress->deinterleave, shift);
     deinterleave(data, stride, width/2, y-progress->deinterleave, temp);
     progress->deinterleave = y;
 }
@@ -391,7 +390,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
                 int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        1, y_l, &t->progress[level], 0, t->buffer);
+                        y_l, &t->progress[level], 0, t->buffer);
             }
             break;
 
@@ -400,7 +399,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
                 int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        1, y_l, &t->progress[level], 1, t->buffer);
+                        y_l, &t->progress[level], 1, t->buffer);
             }
             break;
     }
