@@ -185,7 +185,7 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     ((val1) - ((val0) + (val2) + 1 >> 1))
 
 static void legall_5_3_transform(dwtcoef *data,
-        ptrdiff_t stride, int width, int height, int hstride,
+        ptrdiff_t stride, int width, int height,
         int y, struct progress *progress, dwtcoef *temp
         )
 {
@@ -197,19 +197,19 @@ static void legall_5_3_transform(dwtcoef *data,
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
         for (x = 0; x < width/2 - 1; x++)
-            data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
-                                          data[(2*x+1)*hstride] << 1,
-                                          data[(2*x+2)*hstride] << 1);
-        data[(2*x+1)*hstride] = LIFT2(data[(2*x  )*hstride] << 1,
-                                      data[(2*x+1)*hstride] << 1,
-                                      data[(2*x  )*hstride] << 1);
+            data[2*x+1] = LIFT2(data[2*x  ] << 1,
+                                data[2*x+1] << 1,
+                                data[2*x+2] << 1);
+        data[2*x+1] = LIFT2(data[2*x  ] << 1,
+                            data[2*x+1] << 1,
+                            data[2*x  ] << 1);
 
         /* Lifting stage 1. */
-        data[0] = LIFT1(data[hstride], data[0] << 1, data[hstride]);
+        data[0] = LIFT1(data[1], data[0] << 1, data[1]);
         for (x = 1; x < width/2; x++)
-            data[2*x*hstride] = LIFT1(data[(2*x-1)*hstride],
-                                      data[(2*x  )*hstride] << 1,
-                                      data[(2*x+1)*hstride]);
+            data[2*x] = LIFT1(data[2*x-1],
+                              data[2*x  ] << 1,
+                              data[2*x+1]);
 
         data += stride;
     }
@@ -220,9 +220,9 @@ static void legall_5_3_transform(dwtcoef *data,
     line_max = y - 2;
     for (line = progress->vfilter_stage2; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride+stride] = LIFT2(data[x*hstride],
-                                           data[x*hstride + stride],
-                                           data[x*hstride + stride*2]);
+            data[x+stride] = LIFT2(data[x],
+                                   data[x + stride],
+                                   data[x + stride*2]);
         data += stride*2;
     }
     // line1 = line1 - line0 + line2, line=0
@@ -236,9 +236,9 @@ static void legall_5_3_transform(dwtcoef *data,
     // line15 = line15 - line14 + line16, line=7
     if (line == height - 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride + stride] = LIFT2(data[x*hstride],
-                                             data[x*hstride + stride],
-                                             data[x*hstride]);
+            data[x+stride] = LIFT2(data[x],
+                                   data[x + stride],
+                                   data[x]);
         line += 2;
     }
     progress->vfilter_stage2 = line;
@@ -249,18 +249,18 @@ static void legall_5_3_transform(dwtcoef *data,
     data = data_original;
     if (line == 0 && line_max > 0) {
         for (x = 0; x < width; x++)
-            data[x*hstride] = LIFT1(data[x*hstride + stride],
-                                    data[x*hstride],
-                                    data[x*hstride + stride]);
+            data[x] = LIFT1(data[x + stride],
+                            data[x],
+                            data[x + stride]);
         line += 2;
     }
 
     data += line*stride - stride;
     for (; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
-            data[x*hstride + stride] = LIFT1(data[x*hstride],
-                                             data[x*hstride + stride],
-                                             data[x*hstride + stride*2]);
+            data[x+stride] = LIFT1(data[x],
+                                   data[x + stride],
+                                   data[x + stride*2]);
         data += stride*2;
     }
     // line0 = line0 + line1 + line1, line=0
@@ -381,7 +381,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 legall_5_3_transform(data, stride << level,
                         width >> level, height >> level,
-                        1, y_l, &t->progress[level], t->buffer);
+                        y_l, &t->progress[level], t->buffer);
                 y_l = t->progress[level].deinterleave / 2;
             }
             break;
