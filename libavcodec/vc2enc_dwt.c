@@ -55,7 +55,7 @@ static av_always_inline void deinterleave(dwtcoef *data, ptrdiff_t stride,
 
 static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
         ptrdiff_t stride, int width, int height, int hstride,
-        const int y, struct progress *progress)
+        const int y, struct progress *progress, dwtcoef *temp)
 {
     int x, line, line_max;
     dwtcoef *data_original = data;
@@ -160,6 +160,17 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
         data += stride*2;
     }
     progress->vfilter_stage1 = line;
+
+    line_max = line;
+    if (y != height)
+        line_max -= 1;
+    line = progress->deinterleave;
+    if (line_max < line)
+        return;
+
+    data = data_original + line*stride;
+    deinterleave(data, stride, width/2, line_max-line, temp);
+    progress->deinterleave = line_max;
 }
 
 #undef LIFT1
@@ -361,8 +372,8 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 deslauriers_dubuc_9_7_transform(data, stride << level,
                         width >> level, height >> level,
-                        1 << level, y_l, &t->progress[level]);
-                y_l = t->progress[level].vfilter_stage1 / 2;
+                        1, y_l, &t->progress[level], t->buffer);
+                y_l = t->progress[level].deinterleave / 2;
             }
             break;
 
