@@ -25,6 +25,26 @@
 #include "dirac.h"
 #include "vc2enc_dwt.h"
 
+/* Since the transforms spit out interleaved coefficients, this function
+ * rearranges the coefficients into the more traditional subdivision,
+ * making it easier to encode and perform another level. */
+static av_always_inline void deinterleave(dwtcoef *data, ptrdiff_t stride,
+                                          int width, int lines, dwtcoef *templ)
+{
+    int x, y;
+    dwtcoef *temph = templ + width;
+
+    /* Deinterleave the coefficients. */
+    for (y = 0; y < lines; y++) {
+        for (x = 0; x < width; x++) {
+            templ[x] = data[2*x];
+            temph[x] = data[2*x+1];
+        }
+        memcpy(data, templ, 2*width * sizeof(dwtcoef));
+        data += stride;
+    }
+}
+
 /* Deslauriers-Dubuc (9,7), VC2_TRANSFORM_9_7  */
 
 #define LIFT1(val0, val1, val2)\
@@ -285,11 +305,12 @@ static av_always_inline void dwt_haar(dwtcoef *data,
 static void haar_transform(dwtcoef *data,
         ptrdiff_t stride, int width, int height, int hstride,
         int y, struct progress *progress,
-        const int shift)
+        const int shift, dwtcoef *temp)
 {
-    data += stride * progress->vfilter_stage1;
-    dwt_haar(data, stride, width, y-progress->vfilter_stage1, hstride, shift);
-    progress->vfilter_stage1 = y;
+    data += stride * progress->deinterleave;
+    dwt_haar(data, stride, width, y-progress->deinterleave, hstride, shift);
+    deinterleave(data, stride, width/2, y-progress->deinterleave, temp);
+    progress->deinterleave = y;
 }
 
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
@@ -313,7 +334,8 @@ void ff_vc2enc_reset_transforms(VC2TransformContext *s)
     for (i = 0; i < MAX_DWT_LEVELS; i++) {
         s->progress[i].hfilter =
             s->progress[i].vfilter_stage1 =
-            s->progress[i].vfilter_stage2 = 0;
+            s->progress[i].vfilter_stage2 =
+            s->progress[i].deinterleave = 0;
     }
 }
 
@@ -344,21 +366,19 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
 
         case VC2_TRANSFORM_HAAR:
             for (level = 0; level < depth; level++) {
-                int hstride = 1 << level;
                 int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        hstride, y_l, &t->progress[level], 0);
+                        1, y_l, &t->progress[level], 0, t->buffer);
             }
             break;
 
         case VC2_TRANSFORM_HAAR_S:
             for (level = 0; level < depth; level++) {
-                int hstride = 1 << level;
                 int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        hstride, y_l, &t->progress[level], 1);
+                        1, y_l, &t->progress[level], 1, t->buffer);
             }
             break;
     }

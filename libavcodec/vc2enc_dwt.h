@@ -43,7 +43,7 @@ typedef struct VC2TransformContext {
     dwtcoef *buffer;
     int padding;
     struct progress {
-        int hfilter, vfilter_stage1, vfilter_stage2;
+        int hfilter, vfilter_stage1, vfilter_stage2, deinterleave;
     } progress[MAX_DWT_LEVELS];
 } VC2TransformContext;
 
