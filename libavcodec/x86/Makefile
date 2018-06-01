@@ -79,6 +79,7 @@ OBJS-$(CONFIG_VP9_DECODER)             += x86/vp9dsp_init.o            \
                                           x86/vp9dsp_init_12bpp.o      \
                                           x86/vp9dsp_init_16bpp.o
 OBJS-$(CONFIG_WEBP_DECODER)            += x86/vp8dsp_init.o
+OBJS-$(CONFIG_VC2_ENCODER)             += x86/vc2enc_init.o
 
 
 # GCC inline assembly optimizations
@@ -192,3 +193,5 @@ X86ASM-OBJS-$(CONFIG_VP9_DECODER)      += x86/vp9intrapred.o            \
                                           x86/vp9mc.o                   \
                                           x86/vp9mc_16bpp.o
 X86ASM-OBJS-$(CONFIG_WEBP_DECODER)     += x86/vp8dsp.o
+
+X86ASM-OBJS-$(CONFIG_VC2_ENCODER)      += x86/vc2enc.o

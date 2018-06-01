@@ -25,6 +25,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "dirac.h"
+
 typedef int32_t dwtcoef;
 
 enum VC2TransformType {
@@ -45,6 +47,7 @@ typedef struct VC2TransformContext {
     struct progress {
         int hfilter, vfilter_stage1, vfilter_stage2, deinterleave;
     } progress[MAX_DWT_LEVELS];
+    void (*haar_block)(dwtcoef *data, ptrdiff_t stride, int width, int height);
 } VC2TransformContext;
 
 int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_stride, int p_height,
@@ -54,5 +57,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
         ptrdiff_t stride, int width, int height,
         int y, const int depth, const enum VC2TransformType type);
 void ff_vc2enc_free_transforms(VC2TransformContext *t);
+
+void ff_vc2enc_init_transforms_x86(VC2TransformContext *s);
 
 #endif /* AVCODEC_VC2ENC_DWT_H */
