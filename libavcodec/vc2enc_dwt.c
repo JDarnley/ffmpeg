@@ -22,7 +22,6 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/mem.h"
-#include "dirac.h"
 #include "vc2enc_dwt.h"
 
 /* Since the transforms spit out interleaved coefficients, this function
@@ -307,7 +306,10 @@ static void haar_transform(const VC2TransformContext *s, dwtcoef *data,
         int y, struct progress *progress)
 {
     data += stride * progress->deinterleave;
-    dwt_haar(data, stride, width, y-progress->deinterleave, 1);
+    if (s->haar_block && (width & (2*16/4 - 1)) == 0)
+        s->haar_block(data, stride, width, y-progress->deinterleave);
+    else
+        dwt_haar(data, stride, width, y-progress->deinterleave, 1);
     deinterleave(data, stride, width/2, y-progress->deinterleave, s->buffer);
     progress->deinterleave = y;
 }
@@ -324,6 +326,10 @@ static void haar_noshift_transform(const VC2TransformContext *s, dwtcoef *data,
 
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride)
 {
+#if ARCH_X86_64
+    ff_vc2enc_init_transforms_x86(s);
+#endif
+
     /* Pad by the slice size, only matters for non-Haar wavelets */
     s->buffer = av_calloc(4*p_stride, sizeof(dwtcoef));
     if (!s->buffer)
