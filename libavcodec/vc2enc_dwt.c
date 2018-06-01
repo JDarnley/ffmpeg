@@ -302,14 +302,23 @@ static av_always_inline void dwt_haar(dwtcoef *data,
     }
 }
 
-static void haar_transform(dwtcoef *data,
-        ptrdiff_t stride, int width, int height,
-        int y, struct progress *progress,
-        const int shift, dwtcoef *temp)
+static void haar_transform(const VC2TransformContext *s, dwtcoef *data,
+        ptrdiff_t stride, int width,
+        int y, struct progress *progress)
 {
     data += stride * progress->deinterleave;
-    dwt_haar(data, stride, width, y-progress->deinterleave, shift);
-    deinterleave(data, stride, width/2, y-progress->deinterleave, temp);
+    dwt_haar(data, stride, width, y-progress->deinterleave, 1);
+    deinterleave(data, stride, width/2, y-progress->deinterleave, s->buffer);
+    progress->deinterleave = y;
+}
+
+static void haar_noshift_transform(const VC2TransformContext *s, dwtcoef *data,
+        ptrdiff_t stride, int width,
+        int y, struct progress *progress)
+{
+    data += stride * progress->deinterleave;
+    dwt_haar(data, stride, width, y-progress->deinterleave, 0);
+    deinterleave(data, stride, width/2, y-progress->deinterleave, s->buffer);
     progress->deinterleave = y;
 }
 
@@ -362,18 +371,20 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
         case VC2_TRANSFORM_HAAR:
             for (level = 0; level < depth; level++) {
                 int y_l = (y >> level) & ~1;
-                haar_transform(data, stride << level,
-                        width >> level, height >> level,
-                        y_l, &t->progress[level], 0, t->buffer);
+                if (y_l <= t->progress[level].deinterleave)
+                    break;
+                haar_noshift_transform(t, data, stride << level, width >> level,
+                        y_l, &t->progress[level]);
             }
             break;
 
         case VC2_TRANSFORM_HAAR_S:
             for (level = 0; level < depth; level++) {
                 int y_l = (y >> level) & ~1;
-                haar_transform(data, stride << level,
-                        width >> level, height >> level,
-                        y_l, &t->progress[level], 1, t->buffer);
+                if (y_l <= t->progress[level].deinterleave)
+                    break;
+                haar_transform(t, data, stride << level, width >> level,
+                        y_l, &t->progress[level]);
             }
             break;
     }
