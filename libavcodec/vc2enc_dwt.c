@@ -327,7 +327,7 @@ static void haar_transform(const VC2TransformContext *s, dwtcoef *data,
         int y, struct progress *progress)
 {
     data += stride * progress->deinterleave;
-    if (s->haar_block && (width & (2*16/4 - 1)) == 0)
+    if (s->haar_block && (width & (s->alignment - 1)) == 0)
         s->haar_block(data, stride, width, y-progress->deinterleave);
     else
         dwt_haar(data, stride, width, y-progress->deinterleave, 1);
