@@ -2,6 +2,9 @@
 #include "libavutil/x86/cpu.h"
 #include "libavcodec/vc2enc_dwt.h"
 
+void ff_dd97_hfilter_stage2_sse2(dwtcoef* data, int width);
+void ff_dd97_hfilter_stage2_avx(dwtcoef* data, int width);
+
 void ff_dd97_vfilter_stage2_sse2(dwtcoef* data, ptrdiff_t stride, int width, int height);
 void ff_dd97_vfilter_stage2_avx(dwtcoef* data, ptrdiff_t stride, int width, int height);
 
@@ -29,6 +32,7 @@ av_cold void ff_vc2enc_init_transforms_x86(VC2TransformContext *s)
 
     if (EXTERNAL_SSE2(cpuflags)) {
         s->alignment = 2 * 16 / sizeof (dwtcoef);
+        s->dd97_hfilter_stage2 = ff_dd97_hfilter_stage2_sse2;
         s->dd97_vfilter_stage2 = ff_dd97_vfilter_stage2_sse2;
         s->haar_block = ff_haar_block_sse2;
         s->legall_hfilter_stage1 = ff_legall_hfilter_stage1_sse2;
@@ -45,6 +49,7 @@ av_cold void ff_vc2enc_init_transforms_x86(VC2TransformContext *s)
 
     if (EXTERNAL_AVX(cpuflags)) {
         s->alignment = 2 * 16 / sizeof (dwtcoef);
+        s->dd97_hfilter_stage2 = ff_dd97_hfilter_stage2_avx;
         s->dd97_vfilter_stage2 = ff_dd97_vfilter_stage2_avx;
         s->haar_block = ff_haar_block_avx;
         s->legall_hfilter_stage1 = ff_legall_hfilter_stage1_avx;
