@@ -48,6 +48,7 @@ typedef struct VC2TransformContext {
         int hfilter, vfilter_stage1, vfilter_stage2, deinterleave;
     } progress[MAX_DWT_LEVELS];
     void (*haar_block)(dwtcoef *data, ptrdiff_t stride, int width, int height);
+    void (*legall_hfilter_stage2)(dwtcoef *data, int width);
     void (*legall_vfilter_stage1)(dwtcoef *data, ptrdiff_t stride, int width, int height);
     void (*legall_vfilter_stage2)(dwtcoef *data, ptrdiff_t stride, int width, int height);
     int alignment;
