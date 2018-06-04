@@ -208,7 +208,9 @@ static void legall_5_3_transform(const VC2TransformContext *s, dwtcoef *data,
 
         /* Lifting stage 1. */
         data[0] = LIFT1(data[1], data[0] << 1, data[1]);
-        for (x = 1; x < width/2; x++)
+        if (temp)
+            s->legall_hfilter_stage1(data + 2, temp);
+        for (x = temp + 1; x < width/2; x++)
             data[2*x] = LIFT1(data[2*x-1],
                               data[2*x  ] << 1,
                               data[2*x+1]);

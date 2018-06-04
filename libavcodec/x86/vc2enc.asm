@@ -152,6 +152,35 @@ cglobal legall_vfilter_stage2, 4, 6, 4, data_, stride_, w, h
     jg .loop_h
 RET
 
+cglobal legall_hfilter_stage1, 2, 2, 6, data_, w
+    mova m5, [pd_2]
+
+    ALIGN 16
+    .loop:
+        movu m0, [data_q]
+        movu m1, [data_q + mmsize]
+        movu m2, [data_q - 4]
+        movu m3, [data_q - 4 + mmsize]
+        shufps m4, m0, m1, q3131
+        shufps m0, m1, q2020
+        shufps m2, m3, q2020
+        SWAP 1,4
+
+        pslld m0, 1
+        paddd m2, m1
+        paddd m2, m5
+        psrad m2, 2
+        paddd m0, m2
+        SBUTTERFLY dq, 0, 1, 3
+
+        movu [data_q], m0
+        movu [data_q + mmsize], m1
+
+        add data_q, 2*mmsize
+        sub wd, mmsize/4
+    jg .loop
+RET
+
 cglobal legall_hfilter_stage2, 2, 2, 6, data_, w
     mova m5, [pd_1]
 
