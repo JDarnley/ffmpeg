@@ -24,6 +24,7 @@ SECTION_RODATA 16
 
 cextern pd_1
 pd_2: times 4 dd 2
+pd_8: times 4 dd 8
 
 SECTION .text
 
@@ -292,7 +293,100 @@ RET
 
 %endmacro
 
+%macro DD97_HFILTER_STAGE2 0
+
+cglobal dd97_hfilter_stage2, 2, 2, 9, data_, w
+    mova m7, [pd_8]
+
+    ALIGN 16
+    .loop:
+        mova m0, [data_q - 2*4]
+        movu m1, [data_q]
+        mova m2, [data_q + 2*4]
+        movu m3, [data_q + 4*4]
+        mova m4, [data_q + mmsize + 2*4]
+        movu m5, [data_q + mmsize + 4*4]
+        shufps     m0, m2, q2020
+        shufps m8, m1, m3, q3131
+        shufps     m1, m3, q2020
+        shufps     m2, m4, q2020
+        shufps     m3, m5, q2020
+
+        pslld m0, 1
+        pslld m4, m1, 4
+        pslld m5, m1, 1
+        pslld m6, m2, 4
+        pslld m2, 1
+        pslld m3, 1
+        pslld m8, 1
+
+        paddd m4, m5
+        paddd m6, m2
+        psubd m4, m0
+        psubd m6, m3
+        paddd m4, m7
+        paddd m4, m6
+        psrad m4, 4
+        psubd m8, m4
+        SBUTTERFLY dq, 1, 8, 5
+
+        movu [data_q], m1
+        movu [data_q + mmsize],m8
+
+        add data_q, 2*mmsize
+        sub wd, mmsize/4
+    jg .loop
+RET
+
+%endmacro
+
+%macro DD97_VFILTER_STAGE2 0
+
+cglobal dd97_vfilter_stage2, 4, 7, 4, data_, stride_, w, h
+    shl stride_d, 2
+    mov r4, data_q
+    mov r5d, wd
+    lea r6, [stride_q + 2*stride_q]
+    %define stride3 r6
+    mova m10, [pd_8]
+
+    ALIGN 16
+    .loop_h:
+        .loop_w:
+            mova m0, [data_q]
+            mova m1, [data_q + 2*stride_q]
+            mova m6, [data_q + stride3]
+            mova m2, [data_q + 4*stride_q]
+            mova m3, [data_q + 2*stride3]
+
+            pslld m4, m1, 3
+            pslld m5, m2, 3
+            paddd m4, m1
+            paddd m5, m2
+            psubd m4, m0
+            psubd m5, m3
+            paddd m4, m10
+            paddd m4, m5
+            psrad m4, 4
+            psubd m6, m4
+
+            mova [data_q + stride3], m6
+            add data_q, mmsize
+            sub wd, mmsize/4
+        jg .loop_w
+
+        mov wd, r5d
+        lea r4, [r4 + 2*stride_q]
+        mov data_q, r4
+        sub hd, 2
+    jg .loop_h
+RET
+
+%endmacro
+
 INIT_XMM sse2
+DD97_HFILTER_STAGE2
+DD97_VFILTER_STAGE2
 HAAR_BLOCK
 LEGALL_HFILTER_STAGE1
 LEGALL_HFILTER_STAGE2
@@ -304,6 +398,8 @@ INIT_XMM sse4
 LOAD_PIXEL_DATA
 
 INIT_XMM avx
+DD97_HFILTER_STAGE2
+DD97_VFILTER_STAGE2
 HAAR_BLOCK
 LEGALL_HFILTER_STAGE1
 LEGALL_HFILTER_STAGE2

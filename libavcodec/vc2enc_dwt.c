@@ -91,14 +91,16 @@ static void deslauriers_dubuc_9_7_transform(const VC2TransformContext *s,
     data = data_original + stride*progress->hfilter;
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
-        int temp = (width/2 - 1) & ~(2*16/4-1);
+        int temp = (width/2 - 2) & ~(2*16/4-1);
 
         data[1] = LIFT2(data[0] << 1,
                         data[0] << 1,
                         data[1] << 1,
                         data[2] << 1,
                         data[4] << 1);
-        for (x = 1; x < width/2 - 2; x++)
+        if (temp)
+            s->dd97_hfilter_stage2(data + 2, temp);
+        for (x = temp + 1; x < width/2 - 2; x++)
             data[2*x + 1] = LIFT2(data[2*x - 2] << 1,
                                   data[2*x    ] << 1,
                                   data[2*x + 1] << 1,
@@ -116,6 +118,7 @@ static void deslauriers_dubuc_9_7_transform(const VC2TransformContext *s,
                               data[2*x + 2] << 1);
 
         /* Lifting stage 1. */
+        temp = (width/2 - 1) & ~(2*16/4-1);
         data[0] = LIFT1(data[1], data[0] << 1, data[1]);
         if (temp)
             s->legall_hfilter_stage1(data + 2, temp);
@@ -142,6 +145,10 @@ static void deslauriers_dubuc_9_7_transform(const VC2TransformContext *s,
         line += 2;
     }
     data += stride*(line - 2);
+    if (s->dd97_vfilter_stage2 && (width & 3) == 0 && line_max > line) {
+        s->dd97_vfilter_stage2(data, stride, width, line_max - line);
+        line = FFALIGN(line_max, 2);
+    } else
     for (/* do nothing */; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
             data[x + 3*stride] = LIFT2(data[x],
@@ -152,6 +159,7 @@ static void deslauriers_dubuc_9_7_transform(const VC2TransformContext *s,
         data += stride*2;
     }
     if (line == height - 4) {
+        data = data_original + (line-2)*stride;
         for (x = 0; x < width; x++) {
             data[x + 3*stride] = LIFT2(data[x],
                                        data[x + 2*stride],
