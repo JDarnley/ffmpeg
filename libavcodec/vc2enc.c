@@ -936,7 +936,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
 
     ff_vc2enc_reset_transforms(t);
 
-#define CHUNK_SIZE 8
+#define CHUNK_SIZE 32
 
     for (y = 0; y < p->height; y += CHUNK_SIZE) {
         load_pixel_data((const uint8_t *)frame_data + offset + y*linesize,
