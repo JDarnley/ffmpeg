@@ -217,7 +217,12 @@ static void legall_5_3_transform(const VC2TransformContext *s, dwtcoef *data,
     /* Vertical synthesis: Lifting stage 2. */
     data = data_original + stride*progress->vfilter_stage2;
     line_max = y - 2;
-    for (line = progress->vfilter_stage2; line < line_max; line += 2) {
+    line = progress->vfilter_stage2;
+    if (s->legall_vfilter_stage2 && (width & 3) == 0 && line_max > line) {
+        s->legall_vfilter_stage2(data, stride, width, line_max - line);
+        line = FFALIGN(line_max, 2);
+    } else
+    for (; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
             data[x+stride] = LIFT2(data[x],
                                    data[x + stride],
@@ -234,6 +239,7 @@ static void legall_5_3_transform(const VC2TransformContext *s, dwtcoef *data,
 
     // line15 = line15 - line14 + line16, line=7
     if (line == height - 2) {
+        data = data_original + line*stride;
         for (x = 0; x < width; x++)
             data[x+stride] = LIFT2(data[x],
                                    data[x + stride],
