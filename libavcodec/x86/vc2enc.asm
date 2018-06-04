@@ -23,6 +23,7 @@
 SECTION_RODATA 16
 
 cextern pd_1
+pd_2: times 4 dd 2
 
 SECTION .text
 
@@ -92,6 +93,35 @@ RET
 
 INIT_XMM sse2
 HAAR_BLOCK
+
+cglobal legall_vfilter_stage1, 4, 6, 4, data_, stride_, w, h
+    mov r4, data_q
+    mov r5d, wd
+    mova m3, [pd_2]
+
+    ALIGN 16
+    .loop_h:
+        .loop_w:
+            mova m0, [data_q]
+            mova m1, [data_q + 4*stride_q]
+            mova m2, [data_q + 8*stride_q]
+
+            paddd m0, m2
+            paddd m0, m3
+            psrad m0, 2
+            paddd m1, m0
+
+            mova [data_q + 4*stride_q], m1
+            add data_q, mmsize
+            sub wd, mmsize/4
+        jg .loop_w
+
+        mov wd, r5d
+        lea r4, [r4 + 8*stride_q]
+        mov data_q, r4
+        sub hd, 2
+    jg .loop_h
+RET
 
 INIT_XMM avx
 HAAR_BLOCK
