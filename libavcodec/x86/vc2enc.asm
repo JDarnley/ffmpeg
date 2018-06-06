@@ -216,10 +216,7 @@ RET
 
 %endmacro
 
-INIT_XMM sse2
-HAAR_BLOCK
-LEGALL_HFILTER_STAGE1
-LEGALL_HFILTER_STAGE2
+%macro LEGALL_VFILTER_STAGE1 0
 
 cglobal legall_vfilter_stage1, 4, 6, 4, data_, stride_, w, h
     mov r4, data_q
@@ -249,6 +246,14 @@ cglobal legall_vfilter_stage1, 4, 6, 4, data_, stride_, w, h
         sub hd, 2
     jg .loop_h
 RET
+
+%endmacro
+
+INIT_XMM sse2
+HAAR_BLOCK
+LEGALL_HFILTER_STAGE1
+LEGALL_HFILTER_STAGE2
+LEGALL_VFILTER_STAGE1
 
 cglobal legall_vfilter_stage2, 4, 6, 4, data_, stride_, w, h
     mov r4, data_q
