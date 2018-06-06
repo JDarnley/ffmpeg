@@ -24,6 +24,34 @@
 #include "libavutil/mem.h"
 #include "vc2enc_dwt.h"
 
+static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
+        ptrdiff_t pixel_stride, ptrdiff_t coeff_stride,
+        int width, int height, int bytes_per_pixel, dwtcoef diff_offset)
+{
+    int x, y;
+
+    if (bytes_per_pixel == 1) {
+        const uint8_t *pix = (const uint8_t *)pixels;
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++)
+                coeffs[x] = pix[x] - diff_offset;
+            coeffs += coeff_stride;
+            pix += pixel_stride;
+        }
+    } else {
+        const uint16_t *pix = (const uint16_t *)pixels;
+        pixel_stride /= 2;
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++)
+                coeffs[x] = pix[x] - diff_offset;
+            coeffs += coeff_stride;
+            pix += pixel_stride;
+        }
+    }
+}
+
 /* Since the transforms spit out interleaved coefficients, this function
  * rearranges the coefficients into the more traditional subdivision,
  * making it easier to encode and perform another level. */
@@ -363,6 +391,8 @@ static void haar_noshift_transform(const VC2TransformContext *s, dwtcoef *data,
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
                                       int p_height, int slice_w, int slice_h)
 {
+    s->load_pixel_data = load_pixel_data;
+
 #if ARCH_X86_64
     ff_vc2enc_init_transforms_x86(s);
 #endif

@@ -27,6 +27,64 @@ pd_2: times 4 dd 2
 
 SECTION .text
 
+%macro LOAD_PIXEL_DATA 0
+
+cglobal load_pixel_data, 6, 7, 2, 4*gprsize, pixels_, coeffs_, pixel_stride_, coeff_stride_, w, h
+    shl coeff_stride_q, 2
+    movd m1, r7m ; diff_offset
+    SPLATD m1
+    movsxd wq, wd
+    lea coeffs_q, [coeffs_q + 4*wq]
+
+    cmp dword r6m, 2 ; bytes_per_pixel
+    je .two
+
+    add pixels_q, wq
+    neg wq
+    mov r6, wq
+
+    ALIGN 16
+    .one_loop_h:
+        .one_loop_w:
+            pmovzxbd m0, [pixels_q + wq]
+            psubd m0, m1
+            mova [coeffs_q + 4*wq], m0
+
+            add wq, mmsize/4
+        jl .one_loop_w
+
+        mov wq, r6
+        add pixels_q, pixel_stride_q
+        add coeffs_q, coeff_stride_q
+        sub hd, 1
+    jg .one_loop_h
+    RET
+
+    .two:
+
+    lea pixels_q, [pixels_q + 2*wq]
+    neg wq
+    mov r6, wq
+
+    ALIGN 16
+    .two_loop_h:
+        .two_loop_w:
+            pmovzxwd m0, [pixels_q + 2*wq]
+            psubd m0, m1
+            mova [coeffs_q + 4*wq], m0
+
+            add wq, mmsize/4
+        jl .two_loop_w
+
+        mov wq, r6
+        add pixels_q, pixel_stride_q
+        add coeffs_q, coeff_stride_q
+        sub hd, 1
+    jg .two_loop_h
+RET
+
+%endmacro
+
 %macro HAAR_BLOCK 0
 
 cglobal haar_block, 4, 6, 7, data_, stride_, w, h
@@ -213,6 +271,7 @@ RET
 
 INIT_XMM avx
 HAAR_BLOCK
+LOAD_PIXEL_DATA
 
 INIT_YMM avx2
 HAAR_BLOCK

@@ -883,34 +883,6 @@ static int encode_slices(VC2EncContext *s)
  * to restore the image perfectly to its original size.
  */
 
-static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
-        ptrdiff_t pixel_stride, ptrdiff_t coeff_stride,
-        int width, int height, int bytes_per_pixel, dwtcoef diff_offset)
-{
-    int x, y;
-
-    if (bytes_per_pixel == 1) {
-        const uint8_t *pix = (const uint8_t *)pixels;
-
-        for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x++)
-                coeffs[x] = pix[x] - diff_offset;
-            coeffs += coeff_stride;
-            pix += pixel_stride;
-        }
-    } else {
-        const uint16_t *pix = (const uint16_t *)pixels;
-        pixel_stride /= 2;
-
-        for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x++)
-                coeffs[x] = pix[x] - diff_offset;
-            coeffs += coeff_stride;
-            pix += pixel_stride;
-        }
-    }
-}
-
 static int dwt_plane(AVCodecContext *avctx, void *arg)
 {
     TransformArgs *transform_dat = arg;
@@ -939,7 +911,7 @@ static int dwt_plane(AVCodecContext *avctx, void *arg)
 #define CHUNK_SIZE 32
 
     for (y = 0; y < p->height; y += CHUNK_SIZE) {
-        load_pixel_data((const uint8_t *)frame_data + offset + y*linesize,
+        t->load_pixel_data((const uint8_t *)frame_data + offset + y*linesize,
                 p->coef_buf + y*p->coef_stride,
                 linesize, p->coef_stride,
                 p->width, FFMIN(CHUNK_SIZE, p->height-y), s->bpp, s->diff_offset);
