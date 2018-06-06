@@ -912,34 +912,6 @@ static int encode_hq_slice(AVCodecContext *avctx, void *arg)
  * to restore the image perfectly to its original size.
  */
 
-static void load_pixel_data(const void *pixels, dwtcoef *coeffs,
-        ptrdiff_t pixel_stride, ptrdiff_t coeff_stride,
-        int width, int height, int bytes_per_pixel, dwtcoef diff_offset)
-{
-    int x, y;
-
-    if (bytes_per_pixel == 1) {
-        const uint8_t *pix = (const uint8_t *)pixels;
-
-        for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x++)
-                coeffs[x] = pix[x] - diff_offset;
-            coeffs += coeff_stride;
-            pix += pixel_stride;
-        }
-    } else {
-        const uint16_t *pix = (const uint16_t *)pixels;
-        pixel_stride /= 2;
-
-        for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x++)
-                coeffs[x] = pix[x] - diff_offset;
-            coeffs += coeff_stride;
-            pix += pixel_stride;
-        }
-    }
-}
-
 static int import_transform_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
 {
     VC2EncContext *s       = avctx->priv_data;
@@ -955,7 +927,7 @@ static int import_transform_plane(AVCodecContext *avctx, void *arg, int jobnr, i
     if (pos_y + height > p->height)
         height = p->height - pos_y;
 
-    load_pixel_data(frame->data[jobnr], p->coef_buf + pos_y*p->coef_stride,
+    t->load_pixel_data(frame->data[jobnr], p->coef_buf + pos_y*p->coef_stride,
             frame->linesize[jobnr], p->coef_stride,
             p->width, height, s->bpp, s->diff_offset);
 

@@ -46,6 +46,7 @@ typedef struct VC2TransformContext {
     struct progress {
         int hfilter, vfilter_stage1, vfilter_stage2, deinterleave;
     } progress[MAX_DWT_LEVELS];
+    void (*load_pixel_data)(const void *pixels, dwtcoef *coeffs, ptrdiff_t pixel_stride, ptrdiff_t coeff_stride, int width, int height, int bytes_per_pixel, dwtcoef diff_offset);
     void (*haar_block)(dwtcoef *data, ptrdiff_t stride, int width, int height);
     void (*legall_hfilter_stage1)(dwtcoef *data, int width);
     void (*legall_hfilter_stage2)(dwtcoef *data, int width);

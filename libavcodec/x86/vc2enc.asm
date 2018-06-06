@@ -27,6 +27,74 @@ pd_2: times 4 dd 2
 
 SECTION .text
 
+%macro LOAD_PIXEL_DATA 0
+
+cglobal load_pixel_data, 6, 7, 2 + notcpuflag(sse4), pixels_, coeffs_, pixel_stride_, coeff_stride_, w, h
+    shl coeff_stride_q, 2
+    VPBROADCASTD m1, r7m ; diff_offset
+    movsxd wq, wd
+    lea coeffs_q, [coeffs_q + 4*wq]
+    %if notcpuflag(sse4)
+        pxor m2, m2
+    %endif
+
+    cmp dword r6m, 2 ; bytes_per_pixel
+    je .two
+
+    add pixels_q, wq
+    neg wq
+    mov r6, wq
+    ALIGN 16
+    .one_loop_h:
+        .one_loop_w:
+            %if cpuflag(sse4)
+                pmovzxbd m0, [pixels_q + wq]
+            %else
+                movd m0, [pixels_q + wq]
+                punpcklbw m0, m2
+                punpcklwd m0, m2
+            %endif
+            psubd m0, m1
+            mova [coeffs_q + 4*wq], m0
+
+            add wq, mmsize/4
+        jl .one_loop_w
+
+        mov wq, r6
+        add pixels_q, pixel_stride_q
+        add coeffs_q, coeff_stride_q
+        sub hd, 1
+    jg .one_loop_h
+    RET
+
+    .two:
+    lea pixels_q, [pixels_q + 2*wq]
+    neg wq
+    mov r6, wq
+    ALIGN 16
+    .two_loop_h:
+        .two_loop_w:
+            %if cpuflag(sse4)
+                pmovzxwd m0, [pixels_q + 2*wq]
+            %else
+                movq m0, [pixels_q + 2*wq]
+                punpcklwd m0, m2
+            %endif
+            psubd m0, m1
+            mova [coeffs_q + 4*wq], m0
+
+            add wq, mmsize/4
+        jl .two_loop_w
+
+        mov wq, r6
+        add pixels_q, pixel_stride_q
+        add coeffs_q, coeff_stride_q
+        sub hd, 1
+    jg .two_loop_h
+RET
+
+%endmacro
+
 %macro HAAR_BLOCK 0
 
 cglobal haar_block, 4, 6, 7, data_, stride_, w, h
@@ -230,8 +298,15 @@ LEGALL_HFILTER_STAGE1
 LEGALL_HFILTER_STAGE2
 LEGALL_VFILTER_STAGE1
 LEGALL_VFILTER_STAGE2
+LOAD_PIXEL_DATA
+
+INIT_XMM sse4
+LOAD_PIXEL_DATA
 
 INIT_XMM avx
 HAAR_BLOCK
 LEGALL_HFILTER_STAGE1
 LEGALL_HFILTER_STAGE2
+
+INIT_YMM avx2
+LOAD_PIXEL_DATA
