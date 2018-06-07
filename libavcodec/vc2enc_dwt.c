@@ -80,8 +80,8 @@ static av_always_inline void deinterleave(dwtcoef *data, ptrdiff_t stride,
 #define LIFT2(val0, val1, val2, val3, val4) \
     ((val2) - (-(val0) + 9*(val1) + 9*(val3) - (val4) + 8 >> 4))
 
-static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
-        ptrdiff_t stride, int width, int height,
+static void deslauriers_dubuc_9_7_transform(const VC2TransformContext *s,
+        dwtcoef *data, ptrdiff_t stride, int width, int height,
         const int y, struct progress *progress, dwtcoef *temp)
 {
     int x, line, line_max;
@@ -91,6 +91,8 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     data = data_original + stride*progress->hfilter;
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
+        int temp = (width/2 - 1) & ~(2*16/4-1);
+
         data[1] = LIFT2(data[0] << 1,
                         data[0] << 1,
                         data[1] << 1,
@@ -115,7 +117,9 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
 
         /* Lifting stage 1. */
         data[0] = LIFT1(data[1], data[0] << 1, data[1]);
-        for (x = 1; x < width/2; x++)
+        if (temp)
+            s->legall_hfilter_stage1(data + 2, temp);
+        for (x = temp + 1; x < width/2; x++)
             data[2*x] = LIFT1(data[2*x-1],
                               data[2*x  ] << 1,
                               data[2*x+1]);
@@ -179,6 +183,10 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     }
 
     data += line*stride - stride;
+    if (s->legall_vfilter_stage1 && (width & 3) == 0 && line_max - line > 0) {
+        s->legall_vfilter_stage1(data, stride, width, line_max - line);
+        line = FFALIGN(line_max, 2);
+    } else
     for (; line < line_max; line += 2) {
         for (x = 0; x < width; x++)
             data[x + stride] = LIFT1(data[x],
@@ -428,7 +436,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
     switch (type) {
         case VC2_TRANSFORM_9_7:
             for (level = 0; level < depth; level++) {
-                deslauriers_dubuc_9_7_transform(data, stride << level,
+                deslauriers_dubuc_9_7_transform(t, data, stride << level,
                         width >> level, height >> level,
                         y_l, &t->progress[level], t->buffer);
                 y_l = t->progress[level].deinterleave / 2;
