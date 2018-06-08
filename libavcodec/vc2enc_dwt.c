@@ -91,7 +91,7 @@ static void deslauriers_dubuc_9_7_transform(const VC2TransformContext *s,
     data = data_original + stride*progress->hfilter;
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
-        int temp = (width/2 - 2) & ~(2*16/4-1);
+        int temp = (width/2 - 2) & ~7;
 
         data[1] = LIFT2(data[0] << 1,
                         data[0] << 1,
@@ -118,7 +118,7 @@ static void deslauriers_dubuc_9_7_transform(const VC2TransformContext *s,
                               data[2*x + 2] << 1);
 
         /* Lifting stage 1. */
-        temp = (width/2 - 1) & ~(2*16/4-1);
+        temp = (width/2 - 1) & ~7;
         data[0] = LIFT1(data[1], data[0] << 1, data[1]);
         if (temp)
             s->legall_hfilter_stage1(data + 2, temp);
@@ -239,7 +239,7 @@ static void legall_5_3_transform(const VC2TransformContext *s, dwtcoef *data,
     data = data_original + stride*progress->hfilter;
     for (line = progress->hfilter; line < y; line++) {
         /* Lifting stage 2. */
-        int temp = (width/2 - 1) & ~(2*16/4-1);
+        int temp = (width/2 - 1) & ~7;
         if (temp)
             s->legall_hfilter_stage2(data, temp);
         for (x = temp; x < width/2 - 1; x++)
