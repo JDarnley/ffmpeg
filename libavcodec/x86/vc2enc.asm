@@ -23,6 +23,7 @@
 SECTION_RODATA 16
 
 cextern pd_1
+pd_2: times 4 dd 2
 
 SECTION .text
 
@@ -90,8 +91,147 @@ RET
 
 %endmacro
 
+%macro LEGALL_HFILTER_STAGE1 0
+
+cglobal legall_hfilter_stage1, 2, 2, 6, data_, w
+    mova m5, [pd_2]
+
+    ALIGN 16
+    .loop:
+        movu m0, [data_q]
+        movu m1, [data_q + mmsize]
+        movu m2, [data_q - 4]
+        movu m3, [data_q - 4 + mmsize]
+        shufps m4, m0, m1, q3131
+        shufps m0, m1, q2020
+        shufps m2, m3, q2020
+        SWAP 1,4
+
+        pslld m0, 1
+        paddd m2, m1
+        paddd m2, m5
+        psrad m2, 2
+        paddd m0, m2
+        SBUTTERFLY dq, 0, 1, 3
+
+        movu [data_q], m0
+        movu [data_q + mmsize], m1
+
+        add data_q, 2*mmsize
+        sub wd, mmsize/4
+    jg .loop
+RET
+
+%endmacro
+
+%macro LEGALL_HFILTER_STAGE2 0
+
+cglobal legall_hfilter_stage2, 2, 2, 6, data_, w
+    mova m5, [pd_1]
+
+    ALIGN 16
+    .loop:
+        mova m0, [data_q]
+        mova m1, [data_q + mmsize]
+        movu m2, [data_q + 8]
+        movu m3, [data_q + 8 + mmsize]
+        shufps m4, m0, m1, q3131
+        shufps m0, m1, q2020
+        shufps m2, m3, q2020
+        SWAP 1,4
+
+        paddd m2, m0
+        pslld m1, 1
+        pslld m2, 1
+        paddd m2, m5
+        psrad m2, 1
+        psubd m1, m2
+        SBUTTERFLY dq, 0, 1, 3
+
+        mova [data_q], m0
+        mova [data_q + mmsize], m1
+
+        add data_q, 2*mmsize
+        sub wd, mmsize/4
+    jg .loop
+RET
+
+%endmacro
+
+%macro LEGALL_VFILTER_STAGE1 0
+
+cglobal legall_vfilter_stage1, 4, 6, 4, data_, stride_, w, h
+    mov r4, data_q
+    mov r5d, wd
+    mova m3, [pd_2]
+
+    ALIGN 16
+    .loop_h:
+        .loop_w:
+            mova m0, [data_q]
+            mova m1, [data_q + 4*stride_q]
+            mova m2, [data_q + 8*stride_q]
+
+            paddd m0, m2
+            paddd m0, m3
+            psrad m0, 2
+            paddd m1, m0
+
+            mova [data_q + 4*stride_q], m1
+            add data_q, mmsize
+            sub wd, mmsize/4
+        jg .loop_w
+
+        mov wd, r5d
+        lea r4, [r4 + 8*stride_q]
+        mov data_q, r4
+        sub hd, 2
+    jg .loop_h
+RET
+
+%endmacro
+
+%macro LEGALL_VFILTER_STAGE2 0
+
+cglobal legall_vfilter_stage2, 4, 6, 4, data_, stride_, w, h
+    mov r4, data_q
+    mov r5d, wd
+    mova m3, [pd_1]
+
+    ALIGN 16
+    .loop_h:
+        .loop_w:
+            mova m0, [data_q]
+            mova m1, [data_q + 4*stride_q]
+            mova m2, [data_q + 8*stride_q]
+
+            paddd m0, m2
+            paddd m0, m3
+            psrad m0, 1
+            psubd m1, m0
+
+            mova [data_q + 4*stride_q], m1
+            add data_q, mmsize
+            sub wd, mmsize/4
+        jg .loop_w
+
+        mov wd, r5d
+        lea r4, [r4 + 8*stride_q]
+        mov data_q, r4
+        sub hd, 2
+    jg .loop_h
+RET
+
+%endmacro
+
 INIT_XMM sse2
 HAAR_BLOCK
+LEGALL_HFILTER_STAGE1
+LEGALL_HFILTER_STAGE2
+LEGALL_VFILTER_STAGE1
+LEGALL_VFILTER_STAGE2
 
 INIT_XMM avx
 HAAR_BLOCK
+LEGALL_HFILTER_STAGE1
+LEGALL_HFILTER_STAGE2
