@@ -92,7 +92,6 @@ typedef struct SubBand {
     ptrdiff_t stride;
     int width;
     int height;
-    int hstride;
 } SubBand;
 
 typedef struct Plane {
@@ -604,12 +603,10 @@ static void encode_subband2(VC2EncContext *s, PutBitContext *pb, Plane *p,
 
     dwtcoef *coeff = b->buf + top * b->stride;
 
-    const ptrdiff_t hstride = b->hstride;
-
     for (y = top; y < bottom; y++) {
         for (x = left; x < right; x++) {
-            const int neg = coeff[x * hstride] < 0;
-            uint32_t c_abs = FFABS(coeff[x * hstride]);
+            const int neg = coeff[x] < 0;
+            uint32_t c_abs = FFABS(coeff[x]);
             if (c_abs < COEF_LUT_TAB) {
                 /* Append the sign to the end of the LUT value */
                 put_bits(pb, len_lut[c_abs], val_lut[c_abs] | neg);
@@ -662,11 +659,9 @@ static int count_hq_slice(SliceArgs *slice, int quant_idx)
 
                 dwtcoef *buf = b->buf + top * b->stride;
 
-                const ptrdiff_t hstride = b->hstride;
-
                 for (y = top; y < bottom; y++) {
                     for (x = left; x < right; x++) {
-                        uint32_t c_abs = FFABS(buf[x * hstride]);
+                        uint32_t c_abs = FFABS(buf[x]);
                         if (c_abs < COEF_LUT_TAB) {
                             bits += len_lut[c_abs];
                         } else {
@@ -986,7 +981,7 @@ static int slice_rows_available(const VC2EncContext *s)
         for (p = 0; p < 2; p++) { /* Only check 1 chroma plane */
             for (depth = s->wavelet_depth; depth > 0; depth--) {
                 int height = s->plane[p].dwt_height >> depth;
-                if (height*(y+1)/s->num_y * 2 > s->transform_args[p].t.progress[depth-1].vfilter_stage1)
+                if (height*(y+1)/s->num_y * 2 > s->transform_args[p].t.progress[depth-1].deinterleave)
                     return y;
             }
         }
@@ -1373,7 +1368,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         int h              = avctx->height   >> chroma_y_shift;
         int alignment      = 1 << s->wavelet_depth;
         Plane *p           = &s->plane[i];
-        int hstride        = 1;
+        int stride;
 
         p->width      = w;
         p->height     = h;
@@ -1382,24 +1377,21 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
         p->dwt_width  = w; /* TODO: do I need to store these? */
         p->dwt_height = h;
 
-        p->coef_stride = w = FFALIGN(w, 32); /* TODO: is this stride needed? */
-        p->coef_buf = av_mallocz(w*h*sizeof(dwtcoef));
+        p->coef_stride = stride = FFALIGN(w, 32); /* TODO: is this stride needed? */
+        p->coef_buf = av_mallocz(stride*h*sizeof(dwtcoef));
         if (!p->coef_buf)
             goto alloc_fail;
 
-        w = p->dwt_width;
-        h = p->dwt_height;
         for (level = s->wavelet_depth-1; level >= 0; level--) {
             w = w >> 1;
             h = h >> 1;
-            hstride <<= 1;
+            stride <<= 1;
             for (o = 0; o < 4; o++) {
                 SubBand *b = &p->band[level][o];
                 b->width  = w;
                 b->height = h;
-                b->hstride = hstride;
-                b->stride = p->coef_stride * hstride;
-                shift = (o > 1)*(b->stride >> 1) + (o & 1)*(hstride >> 1);
+                b->stride = stride;
+                shift = (o > 1)*(stride >> 1) + (o & 1)*(w);
                 b->buf = p->coef_buf + shift;
             }
         }

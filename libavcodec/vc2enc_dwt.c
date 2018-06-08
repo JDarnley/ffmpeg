@@ -25,6 +25,26 @@
 #include "dirac.h"
 #include "vc2enc_dwt.h"
 
+/* Since the transforms spit out interleaved coefficients, this function
+ * rearranges the coefficients into the more traditional subdivision,
+ * making it easier to encode and perform another level. */
+static av_always_inline void deinterleave(dwtcoef *data, ptrdiff_t stride,
+                                          int width, int lines, dwtcoef *templ)
+{
+    int x, y;
+    dwtcoef *temph = templ + width;
+
+    /* Deinterleave the coefficients. */
+    for (y = 0; y < lines; y++) {
+        for (x = 0; x < width; x++) {
+            templ[x] = data[2*x];
+            temph[x] = data[2*x+1];
+        }
+        memcpy(data, templ, 2*width * sizeof(dwtcoef));
+        data += stride;
+    }
+}
+
 /* Deslauriers-Dubuc (9,7), VC2_TRANSFORM_9_7  */
 
 #define LIFT1(val0, val1, val2)\
@@ -35,7 +55,7 @@
 
 static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
         ptrdiff_t stride, int width, int height, int hstride,
-        const int y, struct progress *progress)
+        const int y, struct progress *progress, dwtcoef *temp)
 {
     int x, line, line_max;
     dwtcoef *data_original = data;
@@ -140,6 +160,17 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
         data += stride*2;
     }
     progress->vfilter_stage1 = line;
+
+    line_max = line;
+    if (y != height)
+        line_max -= 1;
+    line = progress->deinterleave;
+    if (line_max < line)
+        return;
+
+    data = data_original + line*stride;
+    deinterleave(data, stride, width/2, line_max-line, temp);
+    progress->deinterleave = line_max;
 }
 
 #undef LIFT1
@@ -154,7 +185,8 @@ static void deslauriers_dubuc_9_7_transform(dwtcoef *data,
     ((val1) - ((val0) + (val2) + 1 >> 1))
 
 static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
-        int width, int height, int hstride, int y, struct progress *progress)
+        int width, int height, int hstride, int y, struct progress *progress,
+        dwtcoef *temp)
 {
     int x, line, line_max;
     dwtcoef *data_original = data;
@@ -222,6 +254,17 @@ static void legall_5_3_transform(dwtcoef *data, ptrdiff_t stride,
         data += stride*2;
     }
     progress->vfilter_stage1 = line;
+
+    line_max = line;
+    if (y != height)
+        line_max -= 1;
+    line = progress->deinterleave;
+    if (line_max < line)
+        return;
+
+    data = data_original + line*stride;
+    deinterleave(data, stride, width/2, line_max-line, temp);
+    progress->deinterleave = line_max;
 }
 
 #undef LIFT1
@@ -263,20 +306,18 @@ static av_always_inline void dwt_haar(dwtcoef *data,
 static void haar_transform(dwtcoef *data,
         ptrdiff_t stride, int width, int height, int hstride,
         int y, struct progress *progress,
-        const int shift)
+        const int shift, dwtcoef *temp)
 {
-    y &= ~1;
-    if (y < progress->vfilter_stage1 + 2)
-        return;
-    data += stride * progress->vfilter_stage1;
-    dwt_haar(data, stride, width, y-progress->vfilter_stage1, hstride, shift);
-    progress->vfilter_stage1 = y;
+    data += stride * progress->deinterleave;
+    dwt_haar(data, stride, width, y-progress->deinterleave, hstride, shift);
+    deinterleave(data, stride, width/2, y-progress->deinterleave, temp);
+    progress->deinterleave = y;
 }
 
 av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride)
 {
     /* Pad by the slice size, only matters for non-Haar wavelets */
-    s->buffer = av_calloc(p_stride, sizeof(dwtcoef));
+    s->buffer = av_calloc(4*p_stride, sizeof(dwtcoef));
     if (!s->buffer)
         return 1;
 
@@ -289,7 +330,8 @@ void ff_vc2enc_reset_transforms(VC2TransformContext *s)
     for (i = 0; i < MAX_DWT_LEVELS; i++) {
         s->progress[i].hfilter =
             s->progress[i].vfilter_stage1 =
-            s->progress[i].vfilter_stage2 = 0;
+            s->progress[i].vfilter_stage2 =
+            s->progress[i].deinterleave = 0;
     }
 }
 
@@ -304,7 +346,7 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 deslauriers_dubuc_9_7_transform(data, stride << level,
                         width >> level, height >> level,
-                        1 << level, y_l, &t->progress[level]);
+                        1, y_l, &t->progress[level], t->buffer);
                 y_l = t->progress[level].vfilter_stage1/2 & ~1;
             }
             break;
@@ -313,26 +355,26 @@ void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
             for (level = 0; level < depth; level++) {
                 legall_5_3_transform(data, stride << level,
                         width >> level, height >> level,
-                        1 << level, y_l, &t->progress[level]);
+                        1, y_l, &t->progress[level], t->buffer);
                 y_l = t->progress[level].vfilter_stage1/2 & ~1;
             }
             break;
 
         case VC2_TRANSFORM_HAAR:
             for (level = 0; level < depth; level++) {
-                int hstride = 1 << level;
+                int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        hstride, y >> level, &t->progress[level], 0);
+                        1, y_l, &t->progress[level], 0, t->buffer);
             }
             break;
 
         case VC2_TRANSFORM_HAAR_S:
             for (level = 0; level < depth; level++) {
-                int hstride = 1 << level;
+                int y_l = (y >> level) & ~1;
                 haar_transform(data, stride << level,
                         width >> level, height >> level,
-                        hstride, y >> level, &t->progress[level], 1);
+                        1, y_l, &t->progress[level], 1, t->buffer);
             }
             break;
     }
