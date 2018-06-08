@@ -40,11 +40,13 @@ enum VC2TransformType {
 };
 
 typedef struct VC2TransformContext {
+    dwtcoef *buffer;
     struct progress {
         int hfilter, vfilter_stage1, vfilter_stage2;
     } progress[MAX_DWT_LEVELS];
 } VC2TransformContext;
 
+av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride);
 void ff_vc2enc_reset_transforms(VC2TransformContext *s);
 void ff_vc2enc_transform(VC2TransformContext *t, dwtcoef *data,
         ptrdiff_t stride, int width, int height,

@@ -1220,6 +1220,7 @@ static av_cold int vc2_encode_end(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_INFO, "Qavg: %i\n", s->q_avg);
 
     for (i = 0; i < 3; i++) {
+        av_freep(&s->transform_args[i].t.buffer);
         av_freep(&s->plane[i].coef_buf);
     }
 
@@ -1402,6 +1403,11 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
                 b->buf = p->coef_buf + shift;
             }
         }
+
+        /* DWT init */
+        if (ff_vc2enc_init_transforms(&s->transform_args[i].t,
+                                      s->plane[i].coef_stride))
+            goto alloc_fail;
     }
 
     /* Slices */
