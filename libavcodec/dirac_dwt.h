@@ -88,6 +88,7 @@ enum dwt_type {
 int ff_spatial_idwt_init(DWTContext *d, DWTPlane *p, enum dwt_type type,
                          int decomposition_count, int bit_depth);
 void ff_spatial_idwt_init_x86(DWTContext *d, enum dwt_type type);
+void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type);
 
 void ff_spatial_idwt_slice2(DWTContext *d, int y);
 
