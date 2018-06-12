@@ -25,6 +25,7 @@ SECTION_RODATA
 
 cextern pd_1
 pd_2: times 4 dd 2
+pd_8: times 4 dd 8
 
 SECTION .text
 
@@ -150,7 +151,44 @@ RET
 
 %endmacro
 
+%macro DD97_VERTICAL_HI 0
+
+cglobal dd97_vertical_hi, 6, 6, 11, b0, b1, b2, b3, b4, w
+    mova m10, [pd_8]
+    shl wd, 2
+    add b0q, wq
+    add b1q, wq
+    add b2q, wq
+    add b3q, wq
+    add b4q, wq
+    neg wq
+
+    ALIGN 16
+    .loop:
+        mova m0, [b0q + wq]
+        mova m1, [b1q + wq]
+        mova m2, [b2q + wq]
+        mova m3, [b3q + wq]
+        mova m4, [b4q + wq]
+        pslld m5, m1, 3
+        pslld m6, m3, 3
+        paddd m5, m1
+        paddd m6, m3
+        psubd m5, m0
+        psubd m6, m4
+        paddd m5, m10
+        paddd m5, m6
+        psrad m5, 4
+        paddd m2, m5
+        mova [b2q + wq], m2
+        add wq, mmsize
+    jl .loop
+RET
+
+%endmacro
+
 INIT_XMM sse2
+DD97_VERTICAL_HI
 HAAR_HORIZONTAL
 HAAR_VERTICAL
 LEGALL53_VERTICAL_HI

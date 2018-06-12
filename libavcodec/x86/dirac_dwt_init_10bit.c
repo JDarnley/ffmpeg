@@ -23,6 +23,8 @@
 #include "libavutil/x86/cpu.h"
 #include "libavcodec/dirac_dwt.h"
 
+void ff_dd97_vertical_hi_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int32_t *b3, int32_t *b4, int width);
+
 void ff_legall53_vertical_hi_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int width);
 void ff_legall53_vertical_lo_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int width);
 
@@ -88,6 +90,16 @@ static void legall53_vertical_hi_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int
         b1[i] = COMPOSE_DIRAC53iH0(b0[i], b1[i], b2[i]);
 }
 
+static void dd97_vertical_hi_sse2(int32_t *b0, int32_t *b1, int32_t *b2,
+                                  int32_t *b3, int32_t *b4, int width)
+{
+    int i = width & ~3;
+    ff_dd97_vertical_hi_sse2(b0, b1, b2, b3, b4, i);
+    for(; i<width; i++)
+        b2[i] = COMPOSE_DD97iH0(b0[i], b1[i], b2[i], b3[i], b4[i]);
+
+}
+
 av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
 {
 #if HAVE_X86ASM
@@ -95,6 +107,10 @@ av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
 
     if (EXTERNAL_SSE2(cpu_flags)) {
         switch (type) {
+            case DWT_DIRAC_DD9_7:
+                d->vertical_compose_h0 = (void*)dd97_vertical_hi_sse2;
+                d->vertical_compose_l0 = (void*)legall53_vertical_lo_sse2;
+                break;
             case DWT_DIRAC_LEGALL5_3:
                 d->vertical_compose_h0 = (void*)legall53_vertical_hi_sse2;
                 d->vertical_compose_l0 = (void*)legall53_vertical_lo_sse2;
