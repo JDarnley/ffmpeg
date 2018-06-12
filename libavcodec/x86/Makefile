@@ -7,7 +7,8 @@ OBJS-$(CONFIG_BLOCKDSP)                += x86/blockdsp_init.o
 OBJS-$(CONFIG_BSWAPDSP)                += x86/bswapdsp_init.o
 OBJS-$(CONFIG_DCT)                     += x86/dct_init.o
 OBJS-$(CONFIG_DIRAC_DECODER)           += x86/diracdsp_init.o           \
-                                          x86/dirac_dwt_init.o
+                                          x86/dirac_dwt_init.o \
+                                          x86/dirac_dwt_init_10bit.o
 OBJS-$(CONFIG_FDCTDSP)                 += x86/fdctdsp_init.o
 OBJS-$(CONFIG_FFT)                     += x86/fft_init.o
 OBJS-$(CONFIG_FLACDSP)                 += x86/flacdsp_init.o
@@ -153,7 +154,8 @@ X86ASM-OBJS-$(CONFIG_APNG_DECODER)     += x86/pngdsp.o
 X86ASM-OBJS-$(CONFIG_CAVS_DECODER)     += x86/cavsidct.o
 X86ASM-OBJS-$(CONFIG_DCA_DECODER)      += x86/dcadsp.o x86/synth_filter.o
 X86ASM-OBJS-$(CONFIG_DIRAC_DECODER)    += x86/diracdsp.o                \
-                                          x86/dirac_dwt.o
+                                          x86/dirac_dwt.o \
+                                          x86/dirac_dwt_10bit.o
 X86ASM-OBJS-$(CONFIG_DNXHD_ENCODER)    += x86/dnxhdenc.o
 X86ASM-OBJS-$(CONFIG_EXR_DECODER)      += x86/exrdsp.o
 X86ASM-OBJS-$(CONFIG_FLAC_DECODER)     += x86/flacdsp.o
