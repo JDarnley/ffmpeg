@@ -124,9 +124,36 @@ RET
 
 %endmacro
 
+%macro LEGALL53_VERTICAL_HI 0
+
+cglobal legall53_vertical_hi, 4, 4, 4, b0, b1, b2, w
+    mova m3, [pd_1]
+    shl wd, 2
+    add b0q, wq
+    add b1q, wq
+    add b2q, wq
+    neg wq
+
+    ALIGN 16
+    .loop:
+        mova m0, [b0q + wq]
+        mova m1, [b1q + wq]
+        mova m2, [b2q + wq]
+        paddd m0, m2
+        paddd m0, m3
+        psrad m0, 1
+        paddd m1, m0
+        mova [b1q + wq], m1
+        add wq, mmsize
+    jl .loop
+RET
+
+%endmacro
+
 INIT_XMM sse2
 HAAR_HORIZONTAL
 HAAR_VERTICAL
+LEGALL53_VERTICAL_HI
 LEGALL53_VERTICAL_LO
 
 INIT_XMM avx
