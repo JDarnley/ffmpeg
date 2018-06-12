@@ -23,6 +23,8 @@
 #include "libavutil/x86/cpu.h"
 #include "libavcodec/dirac_dwt.h"
 
+void ff_legall53_vertical_lo_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int width);
+
 void ff_horizontal_compose_haar_10bit_sse2(int32_t *b0, int32_t *b1, int width_align);
 void ff_horizontal_compose_haar_10bit_avx(int32_t *b0, int32_t *b1, int width_align);
 
@@ -69,6 +71,14 @@ static void horizontal_compose_haar_avx(int32_t *b, int32_t *tmp, int width)
     }
 }
 
+static void legall53_vertical_lo_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int width)
+{
+    int i = width & ~3;
+    ff_legall53_vertical_lo_sse2(b0, b1, b2, i);
+    for(; i<width; i++)
+        b1[i] = COMPOSE_53iL0(b0[i], b1[i], b2[i]);
+}
+
 av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
 {
 #if HAVE_X86ASM
@@ -76,6 +86,9 @@ av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
 
     if (EXTERNAL_SSE2(cpu_flags)) {
         switch (type) {
+            case DWT_DIRAC_LEGALL5_3:
+                d->vertical_compose_l0 = (void*)legall53_vertical_lo_sse2;
+                break;
             case DWT_DIRAC_HAAR0:
                 d->vertical_compose = (void*)vertical_compose_haar_sse2;
                 break;
