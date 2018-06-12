@@ -52,8 +52,55 @@ RET
 
 %endmacro
 
+%macro HAAR_HORIZONTAL 0
+
+cglobal horizontal_compose_haar_10bit, 3, 6, 4, b, temp_, w, x, b2
+    mova m2, [pd_1]
+    xor xd, xd
+    shr wd, 1
+    lea b2q, [bq + 4*wq]
+
+    ALIGN 16
+    .loop_lo:
+        mova m0, [bq  + 4*xq]
+        movu m1, [b2q + 4*xq]
+        paddd m1, m2
+        psrad m1, 1
+        psubd m0, m1
+        mova [temp_q + 4*xq], m0
+        add xd, mmsize/4
+        cmp xd, wd
+    jl .loop_lo
+
+    xor xd, xd
+    and wd, ~(mmsize/4 - 1)
+    cmp wd, mmsize/4
+    jl .end
+
+    ALIGN 16
+    .loop_hi:
+        mova m0, [temp_q + 4*xq]
+        movu m1, [b2q    + 4*xq]
+        paddd m1, m0
+        paddd m0, m2
+        paddd m1, m2
+        psrad m0, 1
+        psrad m1, 1
+        SBUTTERFLY dq, 0,1,3
+        mova [bq + 8*xq], m0
+        mova [bq + 8*xq + mmsize], m1
+        add xd, mmsize/4
+        cmp xd, wd
+    jl .loop_hi
+    .end:
+REP_RET
+
+%endmacro
+
 INIT_XMM sse2
+HAAR_HORIZONTAL
 HAAR_VERTICAL
 
 INIT_XMM avx
+HAAR_HORIZONTAL
 HAAR_VERTICAL

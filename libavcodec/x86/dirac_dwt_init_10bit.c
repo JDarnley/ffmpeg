@@ -23,6 +23,9 @@
 #include "libavutil/x86/cpu.h"
 #include "libavcodec/dirac_dwt.h"
 
+void ff_horizontal_compose_haar_10bit_sse2(int32_t *b0, int32_t *b1, int width_align);
+void ff_horizontal_compose_haar_10bit_avx(int32_t *b0, int32_t *b1, int width_align);
+
 void ff_vertical_compose_haar_10bit_sse2(int32_t *b0, int32_t *b1, int width_align);
 void ff_vertical_compose_haar_10bit_avx(int32_t *b0, int32_t *b1, int width_align);
 
@@ -46,6 +49,26 @@ static void vertical_compose_haar_avx(int32_t *b0, int32_t *b1, int width)
     }
 }
 
+static void horizontal_compose_haar_sse2(int32_t *b, int32_t *tmp, int width)
+{
+    int i = width/2 & ~3;
+    ff_horizontal_compose_haar_10bit_sse2(b, tmp, width);
+    for (; i < width/2; i++) {
+        b[2*i  ] = (tmp[i] + 1) >> 1;
+        b[2*i+1] = (COMPOSE_HAARiH0(b[i + width/2], tmp[i]) + 1) >> 1;
+    }
+}
+
+static void horizontal_compose_haar_avx(int32_t *b, int32_t *tmp, int width)
+{
+    int i = width/2 & ~3;
+    ff_horizontal_compose_haar_10bit_avx(b, tmp, width);
+    for (; i < width/2; i++) {
+        b[2*i  ] = (tmp[i] + 1) >> 1;
+        b[2*i+1] = (COMPOSE_HAARiH0(b[i + width/2], tmp[i]) + 1) >> 1;
+    }
+}
+
 av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
 {
 #if HAVE_X86ASM
@@ -57,6 +80,7 @@ av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
                 d->vertical_compose = (void*)vertical_compose_haar_sse2;
                 break;
             case DWT_DIRAC_HAAR1:
+                d->horizontal_compose = (void*)horizontal_compose_haar_sse2;
                 d->vertical_compose = (void*)vertical_compose_haar_sse2;
                 break;
         }
@@ -68,6 +92,7 @@ av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
                 d->vertical_compose = (void*)vertical_compose_haar_avx;
                 break;
             case DWT_DIRAC_HAAR1:
+                d->horizontal_compose = (void*)horizontal_compose_haar_avx;
                 d->vertical_compose = (void*)vertical_compose_haar_avx;
                 break;
         }
