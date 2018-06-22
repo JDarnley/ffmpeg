@@ -25,6 +25,7 @@
 
 void ff_dd97_vertical_hi_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int32_t *b3, int32_t *b4, int width);
 
+void ff_legall53_horizontal_ssse3(int32_t *b0, int32_t *b1, int width);
 void ff_legall53_vertical_hi_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int width);
 void ff_legall53_vertical_lo_sse2(int32_t *b0, int32_t *b1, int32_t *b2, int width);
 
@@ -71,6 +72,16 @@ static void horizontal_compose_haar_avx(int32_t *b, int32_t *tmp, int width)
     for (; i < width/2; i++) {
         b[2*i  ] = (tmp[i] + 1) >> 1;
         b[2*i+1] = (COMPOSE_HAARiH0(b[i + width/2], tmp[i]) + 1) >> 1;
+    }
+}
+
+static void legall53_horizontal_ssse3(int32_t *b, int32_t *tmp, int width)
+{
+    int i = width/2 & ~3;
+    ff_legall53_horizontal_ssse3(b, tmp, width);
+    for(; i < width/2; i++) {
+        b[2*i  ] = (tmp[i] + 1)>>1;
+        b[2*i+1] = (COMPOSE_DIRAC53iH0(tmp[i], b[i+width/2], tmp[i+1]) + 1)>>1;
     }
 }
 
@@ -121,6 +132,14 @@ av_cold void ff_spatial_idwt_init_10bit_x86(DWTContext *d, enum dwt_type type)
             case DWT_DIRAC_HAAR1:
                 d->horizontal_compose = (void*)horizontal_compose_haar_sse2;
                 d->vertical_compose = (void*)vertical_compose_haar_sse2;
+                break;
+        }
+    }
+
+    if (EXTERNAL_SSSE3(cpu_flags)) {
+        switch (type) {
+            case DWT_DIRAC_LEGALL5_3:
+                d->horizontal_compose = (void*)legall53_horizontal_ssse3;
                 break;
         }
     }

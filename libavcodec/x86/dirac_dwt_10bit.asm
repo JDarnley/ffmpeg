@@ -99,6 +99,72 @@ REP_RET
 
 %endmacro
 
+; %1 -= (%2 + %3 + 2)>>2     %4 is pd_2
+%macro COMPOSE_53_LO 4
+    paddd   %2, %3
+    paddd   %2, %4
+    psrad   %2, 2
+    psubd   %1, %2
+%endmacro
+
+; %1 -= (%2 + %3 + 1)>>1     %4 is pd_1
+%macro COMPOSE_53_HI 4
+    paddd   %2, %3
+    paddd   %2, %4
+    psrad   %2, 1
+    paddd   %1, %2
+%endmacro
+
+%macro LEGALL53_HORIZONTAL 0
+
+cglobal legall53_horizontal, 3, 5, 16, b, temp_, w, x, b2
+    mova m11, [pd_1]
+    mova m12, [pd_2]
+    xor xd, xd
+    shr wd, 1
+    lea b2q, [bq + 4*wq]
+    movd m4, [bq + 4*wq]
+    pslldq m4, 12
+
+    ALIGN 16
+    .loop_lo:
+        mova m1, [bq  + 4*xq]
+        movu m0, [b2q + 4*xq]
+        mova m2, m1
+        palignr m1, m4, 12
+        mova m4, m2
+        COMPOSE_53_LO m0, m1, m2, m12
+        mova [temp_q + 4*xq], m0
+        add xd, mmsize/4
+        cmp xd, wd
+    jl .loop_lo
+
+    xor xd, xd
+    and wd, ~(mmsize/4 - 1)
+    cmp wd, mmsize/4
+    jl .end
+
+    ALIGN 16
+    .loop_hi:
+        mova m0, [temp_q + 4*xq]
+        movu m1, [b2q    + 4*xq]
+        movu m2, [temp_q + 4*xq + 4]
+        COMPOSE_53_HI m1, m2, m0, m11
+        paddd m0, m11
+        paddd m1, m11
+        psrad m0, 1
+        psrad m1, 1
+        SBUTTERFLY dq, 0,1,3
+        mova [bq + 8*xq], m0
+        mova [bq + 8*xq + mmsize], m1
+        add xd, mmsize/4
+        cmp xd, wd
+    jl .loop_hi
+    .end:
+REP_RET
+
+%endmacro
+
 %macro LEGALL53_VERTICAL_LO 0
 
 cglobal legall53_vertical_lo, 4, 4, 4, b0, b1, b2, w
@@ -193,6 +259,9 @@ HAAR_HORIZONTAL
 HAAR_VERTICAL
 LEGALL53_VERTICAL_HI
 LEGALL53_VERTICAL_LO
+
+INIT_XMM ssse3
+LEGALL53_HORIZONTAL
 
 INIT_XMM avx
 HAAR_HORIZONTAL
