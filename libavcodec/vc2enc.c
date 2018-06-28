@@ -39,6 +39,9 @@
 #define SSIZE_ROUND(b) (FFALIGN((b), s->size_scaler) + 4 + s->prefix_bytes)
 
 /* Decides the cutoff point in # of slices to distribute the leftover bytes */
+/* When encoding chunks of frames this value may be a few rows of slices.  For
+ * example: FullHD (1920 pixels wide) with default slice_width of 32 results in
+ * 60 slices per row.  */
 #define SLICE_REDIST_TOTAL 150
 
 typedef struct VC2BaseVideoFormat {
@@ -781,6 +784,10 @@ static int calc_slice_sizes(VC2EncContext *s)
     /* 2nd pass - uses the leftover bits and distributes them to the highest
      * costing slices to boost the quality. Not required, you can comment it
      * out to gain a little more speed, but impact is very minimal */
+    /* With a relative few slices available for encoding, there aren't many
+     * opportunities for redistributing the bits.  Consider limiting the number
+     * of passes that can be made here.  With chunks of frames the encoder may
+     * be making many passes over all slices in the entire frame. */
     while (bytes_left > 0) {
         int distributed = 0;
         for (i = 0; i < slice_redist_range; i++) {
@@ -796,6 +803,8 @@ static int calc_slice_sizes(VC2EncContext *s)
             bits  = count_hq_slice(args, new_idx);
             bytes = SSIZE_ROUND(bits >> 3);
             diff  = bytes - prev_bytes;
+            /* A slice which cannot get a lower quantizer without being too
+             * large for the MTU should be removed from consideration. */
             if ((bytes_left - diff) > 0 && bytes < MTU) {
                 args->quant_idx = new_idx;
                 args->bytes = bytes;
