@@ -765,6 +765,7 @@ static int calc_slice_sizes(VC2EncContext *s)
             SliceArgs *args = &enc_args[s->num_x*slice_y + slice_x];
             args->bits_ceil  = s->slice_max_bytes << 3;
             args->bits_floor = s->slice_min_bytes << 3;
+            args->y = slice_y + s->number_of_rows_sent;
             memset(args->cache, 0, s->q_ceil*sizeof(*args->cache));
         }
     }
@@ -1028,9 +1029,6 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
 
     /* Create and write packet. */
     s->num_y_partial = slice_rows_available(s) - s->number_of_rows_sent;
-    for (y = 0; y < s->num_y_partial; y++)
-        for (x = 0; x < s->num_x; x++)
-            s->slice_args[y*s->num_x + x].y = y + s->number_of_rows_sent;
 
     /* Calculate per-slice quantizers and sizes */
     max_frame_bytes = header_size + calc_slice_sizes(s)
