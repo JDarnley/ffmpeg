@@ -44,6 +44,9 @@
  * 60 slices per row.  */
 #define SLICE_REDIST_TOTAL 150
 
+/* Track and print how many times count_hq_slice is run. */
+#define TRACK_COUNT_HQ_SLICE 0
+
 typedef struct VC2BaseVideoFormat {
     enum AVPixelFormat pix_fmt;
     AVRational time_base;
@@ -119,6 +122,9 @@ typedef struct SliceArgs {
     int bits_ceil;
     int bits_floor;
     int bytes;
+#if TRACK_COUNT_HQ_SLICE
+    int number_of_count_hq_slice;
+#endif
 } SliceArgs;
 
 typedef struct TransformArgs {
@@ -687,6 +693,9 @@ static int count_hq_slice(SliceArgs *slice, int quant_idx)
     }
 
     slice->cache[quant_idx] = bits;
+#if TRACK_COUNT_HQ_SLICE
+    slice->number_of_count_hq_slice++;
+#endif
 
     return bits;
 }
@@ -1102,6 +1111,17 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
      * frames (i.e., an even number of fields) and shall begin and end with a
      * whole frame/field-pair. */
     if (field != 1 && s->num_y == s->number_of_rows_sent + s->num_y_partial) {
+#if TRACK_COUNT_HQ_SLICE
+        int total_count_hq_slice = 0;
+        for (y = 0; y < s->num_y; y++)
+            for (x = 0; x < s->num_x; x++) {
+                total_count_hq_slice += s->slice_args[y*s->num_x + x].number_of_count_hq_slice;
+                s->slice_args[y*s->num_x + x].number_of_count_hq_slice = 0;
+            }
+        av_log(s->avctx, AV_LOG_INFO, "total_count_hq_slice: %d, total slices: %d\n",
+                total_count_hq_slice, s->num_y*s->num_x);
+#endif
+
         encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
     }
 
