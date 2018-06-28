@@ -797,7 +797,8 @@ static int calc_slice_sizes(VC2EncContext *s)
      * opportunities for redistributing the bits.  Consider limiting the number
      * of passes that can be made here.  With chunks of frames the encoder may
      * be making many passes over all slices in the entire frame. */
-    while (bytes_left > 0) {
+    int passes = 2;
+    while (bytes_left > 0 && --passes > 0) {
         int distributed = 0;
         for (i = 0; i < slice_redist_range; i++) {
             SliceArgs *args;
