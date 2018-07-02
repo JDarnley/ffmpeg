@@ -157,6 +157,8 @@ typedef struct DiracContext {
     enum AVPixelFormat seq_buf_allocated_fmt;
 
     AVFrame *cached_picture, *prev_field, *current_picture;
+
+    int draw_horiz_band_lines;
 } DiracContext;
 
 static int alloc_sequence_buffers(DiracContext *s)
@@ -690,6 +692,8 @@ static void init_planes(DiracContext *s)
         p->transformed_row_count = 0;
         p->decoded_row_count = 0;
     }
+
+    s->draw_horiz_band_lines = 0;
 }
 
 /**
@@ -824,6 +828,39 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
     return 0;
 }
 
+static void draw_horiz_band(DiracContext *s)
+{
+    int offset[AV_NUM_DATA_POINTERS];
+    int y, h, i, type;
+
+    if (!s->avctx->draw_horiz_band)
+        return;
+
+    /* TODO: chroma subsampling on the height. */
+    y = s->plane[0].transformed_row_count & ~1;
+    h = y - s->draw_horiz_band_lines;
+    if (h <= 0)
+        return;
+    y -= h;
+
+    offset[0] = s->current_picture->linesize[0] * y;
+    offset[1] = s->current_picture->linesize[1] * y;
+    offset[2] = s->current_picture->linesize[2] * y;
+    for (i = 3; i < AV_NUM_DATA_POINTERS; i++)
+        offset[i] = 0;
+
+    if (!s->field_coding)
+        type = 3;
+    else if (!s->cur_field)
+        type = 1;
+    else
+        type = 2;
+
+    s->avctx->draw_horiz_band(s->avctx, s->current_picture, offset, y, type, h);
+
+    s->draw_horiz_band_lines += h;
+}
+
 /**
  * Dirac Specification ->
  * 13.0 Transform data syntax. transform_data()
@@ -841,6 +878,8 @@ static int dirac_decode_frame_internal(DiracContext *s)
     /* Does the iDWT on the 3 planes in parallel, not in git master since
      * the MC depends on doing it serially */
     s->avctx->execute2(s->avctx, idwt_plane, NULL, NULL, 3);
+
+    draw_horiz_band(s);
 
     return 0;
 }
@@ -1277,7 +1316,7 @@ AVCodec ff_dirac_decoder = {
     .init           = dirac_decode_init,
     .close          = dirac_decode_end,
     .decode         = dirac_decode_frame,
-    .capabilities   = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_DR1,
+    .capabilities   = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DRAW_HORIZ_BAND,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .flush          = dirac_decode_flush,
 };
