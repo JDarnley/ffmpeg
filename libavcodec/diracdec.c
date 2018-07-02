@@ -601,6 +601,7 @@ static int decode_lowdelay(DiracContext *s)
 
         /* FIXME: Asumes an entire row of slices is obtained here.  That may be
          * a bad assumption. */
+        /* TODO: chroma subsampling on the height. */
         if (x_offset == s->num_x-1) {
             for (i = 0; i < 3; i++)
                 s->plane[i].decoded_row_count = ((s->plane[i].height >> s->wavelet_depth) * (y_offset+1) / s->num_y) << s->wavelet_depth;
