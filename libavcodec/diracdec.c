@@ -161,6 +161,11 @@ typedef struct DiracContext {
     int draw_horiz_band_lines;
 } DiracContext;
 
+/* Shorthand to determine whether the decoder can/should output a field
+ * separated stream. */
+#define OUTPUT_FIELD_SEP_STREAM(avctx, s) \
+    (avctx->draw_horiz_band != NULL && s->field_coding == 1)
+
 static int alloc_sequence_buffers(DiracContext *s)
 {
     int i, w, h, top_padding;
@@ -801,7 +806,7 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
     Plane *p          = &s->plane[jobnr];
     uint8_t *frame    = s->current_picture->data[jobnr];
     const int idx     = (s->bit_depth - 8) >> 1;
-    const int ostride = p->stride << s->field_coding;
+    const int ostride = p->stride << (s->field_coding && !avctx->draw_horiz_band);
     /* TODO: better wavelets will need more overlap fudging here.  Even Haar
      * needed 1.  Was that because it starts at -1?  Is this the support field
      * in the DWTContext struct? */
@@ -811,7 +816,8 @@ static int idwt_plane(AVCodecContext *avctx, void *arg, int jobnr, int threadnr)
         return 0;
 
     /* Interleaves the fields */
-    frame += s->cur_field * p->stride;
+    if (s->field_coding && !avctx->draw_horiz_band)
+        frame += s->cur_field * p->stride;
 
     /* Does 16 lines at a time -
      * Could reduce the latency by returning 16 lines instead of an entire frame
@@ -978,6 +984,14 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         }
         get_bits_read = DATA_UNIT_HEADER_SIZE*8 + ret;
 
+        /* In case of field separated output halve the height and double the
+         * framerate. */
+        if (avctx->draw_horiz_band && dsh->field_coding) {
+            av_log(avctx, AV_LOG_DEBUG, "outputting a field-separated stream\n");
+            dsh->height >>= 1;
+            dsh->framerate.num *= 2;
+        }
+
         if (CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS) * CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS) > avctx->max_pixels) {
             av_log(avctx, AV_LOG_ERROR, "padded frame (%"PRId64"x%"PRId64") is greater than avctx->max_pixels (%"PRId64")\n",
                     CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS),
@@ -998,7 +1012,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         }
 
         /* In case of interlacing halve the internal height */
-        if (dsh->field_coding)
+        if (dsh->field_coding && !avctx->draw_horiz_band)
             dsh->height >>= 1;
 
         /* Error on on change in pixel formats in the second field */
@@ -1078,7 +1092,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
 
         s->is_fragment = (parse_code & 0x0C) == 0x0C;
 
-        if (s->is_fragment || s->field_coding)
+        if (s->is_fragment || !OUTPUT_FIELD_SEP_STREAM(avctx, s))
             pic = s->cached_picture;
         else
             pic = output_frame;
@@ -1116,7 +1130,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
             /* Spec 14.3 part of initialize_fragment_state */
             s->fragment_slices_received = 0;
 
-            if (!s->field_coding) {
+            if (!s->field_coding || OUTPUT_FIELD_SEP_STREAM(avctx, s)) {
                 /* Some error may mean we have not released the previous
                  * frame/buffer we had.  Free one if it is still there. */
                 if (pic && pic->data[0])
@@ -1278,10 +1292,14 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         if (!s->is_fragment) {
             if (!s->field_coding)
                 goto output_frame;
+            else if (avctx->draw_horiz_band)
+                goto output_frame;
             else if (s->cur_field)
                 goto output_frame;
         } else if (s->fragment_slices_received == s->num_x * s->num_y) {
             if (!s->field_coding)
+                goto output_frame;
+            else if (avctx->draw_horiz_band)
                 goto output_frame;
             else if (s->cur_field)
                 goto output_frame;
