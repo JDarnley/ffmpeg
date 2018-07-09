@@ -976,7 +976,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
             av_log(avctx, AV_LOG_ERROR, "error parsing sequence header");
             return ret;
         }
-        get_bits_read = ret;
+        get_bits_read = DATA_UNIT_HEADER_SIZE*8 + ret;
 
         if (CALC_PADDING((int64_t)dsh->width, MAX_DWT_LEVELS) * CALC_PADDING((int64_t)dsh->height, MAX_DWT_LEVELS) > avctx->max_pixels) {
             av_log(avctx, AV_LOG_ERROR, "padded frame (%"PRId64"x%"PRId64") is greater than avctx->max_pixels (%"PRId64")\n",
@@ -1179,7 +1179,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
         }
 
         if (s->is_fragment && !num_slices)
-            return get_bits_count(&s->gb);
+            return DATA_UNIT_HEADER_SIZE*8 + get_bits_count(&s->gb);
 
         /* Some error, possibly caused by packet loss, leads to this state in
          * the decoder.  The decoder gets here without a current_picture, enters
@@ -1197,7 +1197,7 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                     ret);
             return ret;
         }
-        get_bits_read = get_bits_count(&s->gb);
+        get_bits_read = DATA_UNIT_HEADER_SIZE*8 + get_bits_count(&s->gb);
     } else {
         av_log(s->avctx, AV_LOG_WARNING, "unknown Parse Code (0x%x), continuing\n", parse_code);
     }
