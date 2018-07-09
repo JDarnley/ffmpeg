@@ -1217,10 +1217,6 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
 
     *got_frame = 0;
 
-    /* The parser screwed up - this can happen */
-    if (buf_size == 13)
-        return 0;
-
     /* Loop around the buffer until it finds a parse code since the standard
      * structure of a Sequence header, then an Aux header (encoder info), then
      * the actual frame/field and finally the End of sequence header is not
@@ -1236,7 +1232,7 @@ static int dirac_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
                 break;
         }
         /* BBCD found or end of data */
-        if (buf_idx + DATA_UNIT_HEADER_SIZE >= buf_size)
+        if (buf_idx + DATA_UNIT_HEADER_SIZE > buf_size)
             break;
 
         data_unit_size = AV_RB32(buf+buf_idx+5);
