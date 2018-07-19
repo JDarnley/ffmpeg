@@ -153,8 +153,8 @@ RET
 
 %macro DD97_VERTICAL_HI 0
 
-cglobal dd97_vertical_hi, 6, 6, 11, b0, b1, b2, b3, b4, w
-    mova m10, [pd_8]
+cglobal dd97_vertical_hi, 6, 6, 8, b0, b1, b2, b3, b4, w
+    mova m7, [pd_8]
     shl wd, 2
     add b0q, wq
     add b1q, wq
@@ -176,7 +176,7 @@ cglobal dd97_vertical_hi, 6, 6, 11, b0, b1, b2, b3, b4, w
         paddd m6, m3
         psubd m5, m0
         psubd m6, m4
-        paddd m5, m10
+        paddd m5, m7
         paddd m5, m6
         psrad m5, 4
         paddd m2, m5
