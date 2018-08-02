@@ -609,10 +609,10 @@ static int decode_lowdelay(DiracContext *s)
         /* TODO: chroma subsampling on the height. */
         if (x_offset == s->num_x-1) {
             for (i = 0; i < 3; i++)
-                s->plane[i].decoded_row_count = ((s->plane[i].height >> s->wavelet_depth) * (y_offset+1) / s->num_y) << s->wavelet_depth;
+                s->plane[i].decoded_row_count = ((s->plane[i].idwt.height >> s->wavelet_depth) * (y_offset+1) / s->num_y) << s->wavelet_depth;
         } else {
             for (i = 0; i < 3; i++)
-                s->plane[i].decoded_row_count = ((s->plane[i].height >> s->wavelet_depth) * (y_offset) / s->num_y) << s->wavelet_depth;
+                s->plane[i].decoded_row_count = ((s->plane[i].idwt.height >> s->wavelet_depth) * (y_offset) / s->num_y) << s->wavelet_depth;
         }
 
     } else {
@@ -783,7 +783,7 @@ static int dirac_unpack_idwt_params(DiracContext *s)
 
 static inline int idwt_overlap(const DiracContext *s, const Plane *p)
 {
-    if (p->decoded_row_count == p->height)
+    if (p->decoded_row_count == p->idwt.height)
         return 0;
 
     switch (s->wavelet_idx + 2) {
@@ -845,6 +845,9 @@ static void draw_horiz_band(DiracContext *s)
 
     /* TODO: chroma subsampling on the height. */
     y = s->plane[0].transformed_row_count & ~1;
+    if (y > s->plane[0].height)
+        y = s->plane[0].height;
+
     h = y - s->draw_horiz_band_lines;
     if (h <= 0)
         return;
