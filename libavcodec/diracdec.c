@@ -1139,6 +1139,12 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                 if (pic && pic->data[0])
                     av_frame_unref(pic);
 
+                if (OUTPUT_FIELD_SEP_STREAM(avctx, s)) {
+                    /* FIXME: bff signalling when the decoder supports it. */
+                    pic->interlaced_frame = 1;
+                    pic->top_field_first = 1;
+                }
+
                 if ((ret = get_buffer_with_edge(avctx, pic, 0)) < 0)
                     return ret;
                 av_log(avctx, AV_LOG_DEBUG, "allocated progressive buf\n");
@@ -1154,6 +1160,10 @@ static int dirac_decode_data_unit(AVCodecContext *avctx, AVFrame *output_frame,
                      * frame/buffer we had.  Free one if it is still there. */
                     if (s->prev_field && s->prev_field->data[0])
                         av_frame_unref(s->prev_field);
+
+                    /* FIXME: bff signalling when the decoder supports it. */
+                    pic->interlaced_frame = 1;
+                    pic->top_field_first = 1;
 
                     if ((ret = get_buffer_with_edge(avctx, pic, AV_GET_BUFFER_FLAG_REF)) < 0)
                         return ret;
