@@ -1311,7 +1311,7 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     }
 
     if (avctx->width % s->slice_width || avctx->height % s->slice_height) {
-        av_log(avctx, AV_LOG_ERROR, "slice dimensions (%dx%d) not a factor of the frame size (%dx%d)\n",
+        av_log(avctx, AV_LOG_WARNING, "slice dimensions (%dx%d) not a factor of the frame size (%dx%d)\n",
                 s->slice_width, s->slice_height, avctx->width, avctx->height);
         // return AVERROR(EINVAL);
     }
@@ -1407,6 +1407,8 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
     /* Slices */
     s->num_x = s->plane[0].dwt_width/s->slice_width;
     s->num_y = s->plane[0].dwt_height/s->slice_height;
+    av_log(avctx, AV_LOG_INFO, "Slice count: %d, num_x: %d, num_y: %d\n",
+            s->num_x * s->num_y, s->num_x, s->num_y);
 
     if (s->fragment_size) {
         if (s->num_x % s->fragment_size) {
