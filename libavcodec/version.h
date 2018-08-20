@@ -130,5 +130,8 @@
 #define FF_API_LOCKMGR (LIBAVCODEC_VERSION_MAJOR < 59)
 #endif
 
+#ifndef FF_API_CHUNK_SUPPORT
+#define FF_API_CHUNK_SUPPORT 1
+#endif
 
 #endif /* AVCODEC_VERSION_H */
