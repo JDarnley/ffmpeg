@@ -1124,6 +1124,12 @@ static int encode_frame(VC2EncContext *s, AVPacket *avpkt, const AVFrame *frame,
         encode_parse_info(s, DIRAC_PCODE_END_SEQ, 13, s->prev_offset);
     }
 
+#if FF_API_CHUNK_SUPPORT
+    avpkt->chunk_fraction.num = lines_in_packet(s);
+    avpkt->chunk_position.num = s->number_of_lines_sent;
+    avpkt->chunk_fraction.den = avpkt->chunk_position.den = s->plane[0].dwt_height;
+#endif
+
     s->number_of_rows_sent += s->num_y_partial;
     s->number_of_lines_sent += lines_in_packet(s);
     *got_packet = 1;
