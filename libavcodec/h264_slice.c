@@ -2527,32 +2527,17 @@ static void predict_field_decoding_flag(const H264Context *h, H264SliceContext *
 /**
  * Draw edges and report progress for the last MB row.
  */
-static void decode_finish_row(const H264Context *h, H264SliceContext *sl, int slice_end)
+static void decode_finish_row(const H264Context *h, H264SliceContext *sl, int do_draw_horiz_band)
 {
     int top            = 16 * (sl->mb_y      >> FIELD_PICTURE(h));
     int pic_height     = 16 *  h->mb_height >> FIELD_PICTURE(h);
     int height         =  16      << FRAME_MBAFF(h);
     int deblock_border = (16 + 4) << FRAME_MBAFF(h);
 
-    /* Slice-threaded draw_horiz_band not useful in this situation */
-    if (sl->deblocking_filter == 1) {
+    if (sl->deblocking_filter) {
         if ((top + height) >= pic_height)
             height += deblock_border;
         top -= deblock_border;
-    }
-    else if (sl->deblocking_filter == 2) {
-        int first_mb_y = sl->first_mb_addr / h->mb_width;
-
-        /* Draw the whole slice if it's possible:
-         * - If the beginning of the slice is at the start of a row
-         * - If we are at the end of the slice
-         * Previous slice is guaranteed not be included. */
-        if (!(sl->first_mb_addr % h->mb_width)) {
-            if (slice_end) {
-                top = 16 * (first_mb_y >> FIELD_PICTURE(h));
-                height = (16 << FRAME_MBAFF(h)) * ((sl->mb_y+1) - first_mb_y);
-            }
-        }
     }
 
     if (top >= pic_height || (top + height) < 0)
@@ -2564,8 +2549,12 @@ static void decode_finish_row(const H264Context *h, H264SliceContext *sl, int sl
         top    = 0;
     }
 
-    if (slice_end)
+    if (do_draw_horiz_band) {
+        int first_mb_y = sl->first_mb_addr / h->mb_width;
+        int top = 16 * (first_mb_y >> FIELD_PICTURE(h));
+        int height = (16 << FRAME_MBAFF(h)) * ((sl->mb_y+1) - first_mb_y);
         ff_h264_draw_horiz_band(h, sl, top, height);
+    }
 
     if (h->droppable || sl->h264->slice_ctx[0].er.error_occurred)
         return;
@@ -2638,7 +2627,7 @@ static int decode_slice(struct AVCodecContext *avctx, void *arg)
 
         for (;;) {
             // START_TIMER
-            int ret, eos, slice_end;
+            int ret, eos;
             if (sl->mb_x + sl->mb_y * h->mb_width >= sl->next_slice_idx) {
                 av_log(h->avctx, AV_LOG_ERROR, "Slice overlaps with next at %d\n",
                        sl->next_slice_idx);
@@ -2685,11 +2674,12 @@ static int decode_slice(struct AVCodecContext *avctx, void *arg)
                 return AVERROR_INVALIDDATA;
             }
 
-            slice_end = eos || sl->mb_y >= h->mb_height;
             if (++sl->mb_x >= h->mb_width) {
+                int do_draw_horiz_band = (eos || sl->mb_y >= h->mb_height)
+                    && lf_x_start == 0 && sl->deblocking_filter == 2;
                 loop_filter(h, sl, lf_x_start, sl->mb_x);
                 sl->mb_x = lf_x_start = 0;
-                decode_finish_row(h, sl, slice_end);
+                decode_finish_row(h, sl, do_draw_horiz_band);
                 ++sl->mb_y;
                 if (FIELD_OR_MBAFF_PICTURE(h)) {
                     ++sl->mb_y;
