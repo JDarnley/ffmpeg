@@ -2492,7 +2492,7 @@ static void decode_finish_row(const H264Context *h, H264SliceContext *sl, int do
     }
 
     if (do_draw_horiz_band) {
-        int first_mb_y = sl->first_mb_addr / h->mb_width;
+        int first_mb_y = (sl->first_mb_addr / h->mb_width) << FIELD_OR_MBAFF_PICTURE(h);
         int top = 16 * (first_mb_y >> FIELD_PICTURE(h));
         int height = (16 << FRAME_MBAFF(h)) * ((sl->mb_y+1) - first_mb_y);
         ff_h264_draw_horiz_band(h, sl, top, height);
