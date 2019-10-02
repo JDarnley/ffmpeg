@@ -198,7 +198,7 @@ int main(int argc, char **argv)
     char *p;
 
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <threads> <input file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <threads> <input file> [<raw_frame_output> <raw_slice_output>]\n", argv[0]);
         return -1;
     }
 
@@ -246,8 +246,8 @@ int main(int argc, char **argv)
         goto err;
     }
 
-    c->width  = 352;
-    c->height = 288;
+    c->width  = 704;
+    c->height = 576;
 
     c->flags2 |= AV_CODEC_FLAG2_CHUNKS;
     c->thread_type = FF_THREAD_SLICE;
